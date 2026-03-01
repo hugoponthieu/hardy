@@ -37,6 +37,7 @@ pub enum Error {
 pub enum ClaAddressType {
     /// IPv4 and IPv6 address + port.
     Tcp,
+    Csp,
     /// A private address type.
     Private,
 }
@@ -47,6 +48,7 @@ pub enum ClaAddressType {
 pub enum ClaAddress {
     /// An TCP address, represented as a standard socket address.
     Tcp(core::net::SocketAddr),
+    Csp(u8, u8),
     /// An address for an unknown or custom CLA, containing the type identifier and the raw address bytes.
     #[cfg_attr(feature = "serde", serde(with = "private_addr_serde"))]
     Private(Bytes),
@@ -77,6 +79,7 @@ impl ClaAddress {
         match self {
             ClaAddress::Tcp(_) => ClaAddressType::Tcp,
             ClaAddress::Private(_) => ClaAddressType::Private,
+            ClaAddress::Csp(_, _) => ClaAddressType::Csp,
         }
     }
 }
@@ -93,6 +96,16 @@ impl TryFrom<(ClaAddressType, Bytes)> for ClaAddress {
                     .map_err(|e| Error::Internal(Box::new(e)))?,
             )),
             ClaAddressType::Private => Ok(ClaAddress::Private(addr)),
+            ClaAddressType::Csp => {
+                let mut bytes_iter = addr.iter();
+                if let Some(remote_addr) = bytes_iter.next()
+                    && let Some(remote_port) = bytes_iter.next()
+                {
+                    Ok(ClaAddress::Csp(*remote_addr, *remote_port))
+                } else {
+                    Err(Error::Internal("Could not parse csp address".into()))
+                }
+            }
         }
     }
 }
@@ -105,6 +118,10 @@ impl From<ClaAddress> for (ClaAddressType, Bytes) {
                 socket_addr.to_string().into_bytes().into(),
             ),
             ClaAddress::Private(bytes) => (ClaAddressType::Private, bytes),
+            ClaAddress::Csp(addr, port) => {
+                let bytes = vec![addr, port];
+                (ClaAddressType::Csp, bytes.into())
+            }
         }
     }
 }
@@ -115,6 +132,9 @@ impl core::fmt::Display for ClaAddress {
             ClaAddress::Tcp(socket_addr) => write!(f, "tcp:{socket_addr}"),
             ClaAddress::Private(bytes) => {
                 write!(f, "private:{bytes:02x?}")
+            }
+            ClaAddress::Csp(addr, port) => {
+                write!(f, "csp:{addr},{port}")
             }
         }
     }

@@ -24,6 +24,10 @@ pub enum ClaConfig {
     #[serde(rename = "file-cla")]
     File(hardy_file_cla::Config),
 
+    #[cfg(feature = "cspcl")]
+    #[serde(rename = "cspcl")]
+    Cspcl(cspcl::Config),
+
     // Catch unknown values
     #[serde(other)]
     Unknown,
@@ -67,6 +71,18 @@ pub async fn init(config: &[Cla], bpa: &dyn BpaRegistration) -> anyhow::Result<(
                     .map_err(|e| {
                         anyhow::anyhow!("Failed to start CLA '{}': {e}", cla_config.name)
                     })?;
+            }
+            #[cfg(feature = "cspcl")]
+            ClaConfig::Cspcl(config) => {
+                let cla = Arc::new(cspcl::Cla::new(cla_config.name, config));
+                bpa.register_cla(
+                    cla_config.name.clone(),
+                    Some(hardy_bpa::cla::ClaAddressType::Csp),
+                    cla,
+                    policy,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to start CLA '{}': {e}", cla_config.name))?;
             }
         };
     }

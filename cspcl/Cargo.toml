@@ -1,0 +1,15 @@
+[package]
+name = "cspcl"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hardy-bpv7 = { path = "../bpv7" }
+hardy-bpa = { path = "../bpa" }
+cspcl = { path = "/home/hugo/code/cspcl-temp/rust-bindings/cspcl" }
+spin = "0.10.0"
+hardy-async = { path = "../async" }
+tracing = "0.1.44"
+tokio = { version = "1.49.0", features = ["macros", "time", "net", "io-util"] }
+tokio-util = { version = "0.7.18", features = ["codec"] }

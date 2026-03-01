@@ -1,0 +1,66 @@
+use clap::Parser;
+use hardy_proto::cla::{cla_to_bpa::Msg, ClaToBpa, RegisterClaRequest};
+use std::path::PathBuf;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::info;
+
+mod config;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to configuration file
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Initialize logging
+    tracing_subscriber::fmt::init();
+
+    let args = Args::parse();
+    let config = config::load(args.config)?;
+
+    info!("Starting TCPCLv4 Server (CLA: {})", config.cla_name);
+    info!("Connecting to BPA at {}", config.bpa_address);
+
+    // Create the CLA instance
+    // This will validate the TCPCL configuration and prepare the internal state
+    // let _cla = hardy_tcpclv4::Cla::new(config.cla_name.clone(), config.tcpcl);
+
+    // Connect to BPA via gRPC
+    let mut client = hardy_proto::cla::cla_client::ClaClient::connect(config.bpa_address).await?;
+
+    // Create a channel for outbound messages (CLA → BPA)
+    let (tx, rx) = mpsc::channel::<ClaToBpa>(16);
+    let outbound = ReceiverStream::new(rx);
+
+    // Open the bidirectional Register stream
+    let mut response_stream = client.register(outbound).await?.into_inner();
+
+    // First message must be RegisterClaRequest
+    tx.send(ClaToBpa {
+        msg_id: 0,
+        msg: Some(Msg::Register(RegisterClaRequest {
+            name: config.cla_name.clone(),
+            address_type: None,
+        })),
+    })
+    .await?;
+
+    // Spawn a task to receive messages from the BPA
+    tokio::spawn(async move {
+        while let Ok(Some(msg)) = response_stream.message().await {
+            info!("Received from BPA: {:?}", msg);
+        }
+    });
+
+    // Use `tx` here to send further packets (e.g. DispatchBundleRequest, AddPeerRequest…)
+    // Example: tx.send(ClaToBpa { msg_id: 1, msg: Some(Msg::Dispatch(...)) }).await?;
+
+    tokio::signal::ctrl_c().await?;
+    info!("Shutting down");
+    Ok(())
+}

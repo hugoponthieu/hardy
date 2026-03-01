@@ -9,7 +9,16 @@ name = "hardy-bpa-server"
 path = "src/main.rs"
 
 [features]
-default = ["localdisk-storage", "grpc", "tcpclv4", "otel", "ipn-legacy-filter", "echo"]
+
+tracing = ["hardy-async/tracing"]
+default = [
+  "localdisk-storage",
+  "grpc",
+  "tcpclv4",
+  "otel",
+  "ipn-legacy-filter",
+  "echo",
+]
 otel = ["dep:hardy-otel"]
 sqlite-storage = ["dep:hardy-sqlite-storage"]
 postgres-storage = ["dep:hardy-postgres-storage"]
@@ -21,24 +30,46 @@ tcpclv4 = ["dep:hardy-tcpclv4"]
 file-cla = ["dep:hardy-file-cla"]
 ipn-legacy-filter = ["dep:hardy-ipn-legacy-filter"]
 echo = ["dep:hardy-echo-service"]
-tracing = ["hardy-async/tracing"]
-
+cspcl = ["dep:cspcl"]
 [dependencies]
+hardy-postgres-storage = { path = "../postgres-storage", optional = true }
 hardy-async = { path = "../async" }
 hardy-bpv7 = { path = "../bpv7", features = ["serde"] }
-hardy-bpa = { path = "../bpa", default-features = false, features = ["serde", "rfc9173", "tokio", "no-rfc9171-autoregister"] }
-hardy-eid-patterns = { path = "../eid-patterns", features = ["serde", "dtn-pat-item"] }
+hardy-bpa = { path = "../bpa", default-features = false, features = [
+  "serde",
+  "rfc9173",
+  "tokio",
+  "no-rfc9171-autoregister",
+] }
+hardy-eid-patterns = { path = "../eid-patterns", features = [
+  "serde",
+  "dtn-pat-item",
+] }
 hardy-proto = { path = "../proto", optional = true }
 hardy-sqlite-storage = { path = "../sqlite-storage", optional = true }
-hardy-postgres-storage = { path = "../postgres-storage", optional = true }
-hardy-localdisk-storage = { path = "../localdisk-storage", features = ["serde"], optional = true }
-hardy-s3-storage = { path = "../s3-storage", features = ["serde"], optional = true }
+hardy-localdisk-storage = { path = "../localdisk-storage", features = [
+  "serde",
+], optional = true }
+hardy-s3-storage = { path = "../s3-storage", features = [
+  "serde",
+], optional = true }
 hardy-tcpclv4 = { path = "../tcpclv4", features = ["serde"], optional = true }
+cspcl = { path = "../cspcl/", optional = true }
 hardy-file-cla = { path = "../file-cla", features = ["serde"], optional = true }
 hardy-otel = { path = "../otel", optional = true }
-hardy-ipn-legacy-filter = { path = "../ipn-legacy-filter", features = ["serde"], optional = true }
+hardy-ipn-legacy-filter = { path = "../ipn-legacy-filter", features = [
+  "serde",
+], optional = true }
 hardy-echo-service = { path = "../echo-service", optional = true }
-tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1.50.0", features = [
+  "rt-multi-thread",
+  "macros",
+  "signal",
+] }
+tokio-util = "0.7.18"
+tokio-stream = { version = "0.1.18", optional = true }
+tonic = { version = "0.14.4", optional = true }
+prost-types = { version = "0.14.3", optional = true }
 config = { version = "0.15.22", features = ["toml"] }
 serde = { version = "1.0.228", features = ["derive"] }
 getopts = "0.2.24"
@@ -46,7 +77,9 @@ directories = "6.0.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 notify-debouncer-full = "0.7.0"
-notify = { version = "8.2.0", default-features = false, features = ["macos_kqueue"] }
+notify = { version = "8.2.0", default-features = false, features = [
+  "macos_kqueue",
+] }
 trace-err = "1.0.0"
 winnow = "1.0.0"
 anyhow = "1.0.102"

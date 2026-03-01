@@ -1,0 +1,18 @@
+# TCPCLv4 Server Configuration
+
+# BPA gRPC server address
+bpa_address = "http://[::1]:50052"
+
+# CLA instance name
+cla_name = "tcpclv4-server"
+
+# TLS configuration (required)
+[tls]
+# Path to server certificate (PEM format)
+server_cert = "tcpclv4-server/certs/server.crt"
+# Path to server private key (PEM format)
+server_key = "tcpclv4-server/certs/server.key"
+# Debug settings
+[tls.debug]
+# Allow self-signed certificates for testing
+accept_self_signed = true
