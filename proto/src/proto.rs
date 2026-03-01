@@ -2,6 +2,7 @@ use super::*;
 
 pub mod cla {
     use super::*;
+    use hardy_bpa::Bytes;
 
     tonic::include_proto!("cla");
 
@@ -18,6 +19,16 @@ pub mod cla {
                         tonic::Status::invalid_argument(format!("Invalid address: {e}"))
                     })?;
                     Ok(hardy_bpa::cla::ClaAddress::Tcp(address))
+                }
+                (Ok(ClaAddressType::Csp), address) => {
+                    let mut bytes_iter = address.iter();
+                    if let Some(addr) = bytes_iter.next()
+                        && let Some(port) = bytes_iter.next()
+                    {
+                        Ok(hardy_bpa::cla::ClaAddress::Csp(*addr, *port))
+                    } else {
+                        Err(tonic::Status::invalid_argument("Wrong address format"))
+                    }
                 }
                 (Ok(ClaAddressType::Private) | Err(_), address) => {
                     Ok(hardy_bpa::cla::ClaAddress::Private(address))
@@ -36,6 +47,10 @@ pub mod cla {
                 hardy_bpa::cla::ClaAddress::Private(address) => ClaAddress {
                     address_type: ClaAddressType::Private.into(),
                     address,
+                },
+                hardy_bpa::cla::ClaAddress::Csp(address, port) => ClaAddress {
+                    address_type: ClaAddressType::Csp.into(),
+                    address: Bytes::from(vec![address, port]),
                 },
             }
         }

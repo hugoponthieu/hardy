@@ -199,6 +199,7 @@ pub async fn register_cla(
                 match a {
                     hardy_bpa::cla::ClaAddressType::Tcp => ClaAddressType::Tcp,
                     hardy_bpa::cla::ClaAddressType::Private => ClaAddressType::Private,
+                    hardy_bpa::cla::ClaAddressType::Csp => ClaAddressType::Csp,
                 }
                 .into()
             }),
