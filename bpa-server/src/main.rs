@@ -95,7 +95,6 @@ async fn main() -> anyhow::Result<()> {
     let Some(cli) = cli::parse() else {
         return Ok(());
     };
-    dbg!(config);
 
     let config = config::load(&cli);
 

@@ -234,6 +234,7 @@ impl cla_server::Cla for Service {
                             request.address_type.map(|address_type| {
                                 match address_type.try_into() {
                                     Ok(ClaAddressType::Tcp) => hardy_bpa::cla::ClaAddressType::Tcp,
+                                    Ok(ClaAddressType::Csp) => hardy_bpa::cla::ClaAddressType::Csp,
                                     Err(_) | Ok(ClaAddressType::Private) => {
                                         hardy_bpa::cla::ClaAddressType::Private
                                     }

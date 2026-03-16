@@ -26,7 +26,7 @@ pub enum ClaConfig {
 
     #[cfg(feature = "cspcl")]
     #[serde(rename = "cspcl")]
-    Cspcl(cspcl::Config),
+    Cspcl(cspcl::config::Config),
 
     // Catch unknown values
     #[serde(other)]
@@ -74,7 +74,7 @@ pub async fn init(config: &[Cla], bpa: &dyn BpaRegistration) -> anyhow::Result<(
             }
             #[cfg(feature = "cspcl")]
             ClaConfig::Cspcl(config) => {
-                let cla = Arc::new(cspcl::Cla::new(cla_config.name, config));
+                let cla = Arc::new(cspcl::Cla::new(cla_config.name.clone(), config.clone()));
                 bpa.register_cla(
                     cla_config.name.clone(),
                     Some(hardy_bpa::cla::ClaAddressType::Csp),

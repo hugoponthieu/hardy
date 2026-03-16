@@ -1,6 +1,7 @@
-use cspcl::interface::Interface;
+use cspcl::Interface;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 // #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 // #[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {

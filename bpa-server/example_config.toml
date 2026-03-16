@@ -3,13 +3,13 @@
 
 # The logging level for the application.
 # Can be one of: trace, debug, info, warn, error
-#log-level = "info"
+log-level = "debug"
 
 # Configuration for the gRPC management interface. This section is optional.
 # The gRPC server only starts if at least one service is enabled.
 [grpc]
 # The local IP address and port to listen on for gRPC requests.
-#address = "[::1]:50051"
+address = "[::1]:50052"
 # List of gRPC services to enable. Available: "application", "cla", "service"
 # The gRPC server will not start if this list is empty.
 services = ["application", "cla", "service"]
@@ -44,7 +44,7 @@ services = ["application", "cla", "service"]
 # Selects the storage engine for bundle metadata.
 # If not set, an in-memory store is used (data lost on restart).
 [storage.metadata]
-type = "sqlite" # or "memory"
+type = "memory" # or "memory"
 # --- SQLite Configuration (`type = "sqlite"`) ---
 # The directory where the SQLite database file will be stored.
 #db-dir = "/var/lib/hardy-bpa-server/db" # Default varies by OS
@@ -55,7 +55,7 @@ type = "sqlite" # or "memory"
 # Selects the storage engine for bundle payload data.
 # If not set, an in-memory store is used (data lost on restart).
 [storage.bundle]
-type = "localdisk" # or "memory"
+type = "memory" # or "memory"
 # --- Local Disk Configuration (`type = "localdisk"`) ---
 # The root directory where bundle files will be stored.
 #store-dir = "/var/spool/hardy-bpa-server/bundles" # Default varies by OS
@@ -93,7 +93,7 @@ type = "localdisk" # or "memory"
 # Configuration for the static routing module. This section is optional.
 [static-routes]
 # The path to the file containing static route definitions.
-routes-file = "/etc/hardy-bpa-server/static_routes.yaml"
+routes-file = "/home/hugo/code/hardy/bpa-server/static_routes_example"
 # Whether to monitor the routes file for changes and automatically reload it.
 #watch = true
 # Default priority for routes loaded from this file.
@@ -105,11 +105,15 @@ routes-file = "/etc/hardy-bpa-server/static_routes.yaml"
 # Each item in the list defines a CLA instance.
 [[clas]]
 # A user-defined name for this CLA instance. Used for logging and identification.
-name = "tcp-cla-1"
+name = "cspcl1"
 
 # Specifies the type of CLA to configure.
-type = "tcpclv4"
+type = "cspcl"
 
+interface = { Can = "vcan0" }
+
+local_addr = 2
+local_port = 3
 # --- TCPCLv4 Configuration (`type = "tcpclv4"`) ---
 # The local IP address and port for the CLA to listen on for incoming connections.
 #address = "[::]:4556"

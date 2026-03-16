@@ -6,7 +6,7 @@ use hardy_bpa::{
     Bytes, async_trait,
     cla::{ClaAddress, Error, ForwardBundleResult, Sink},
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{Cla, ClaInner};
 
@@ -14,11 +14,18 @@ impl ClaInner {
     fn start_listener(&self, tasks: &Arc<TaskPool>) {
         let cspcl = Arc::clone(&self.cspcl);
         let sink = Arc::clone(&self.sink);
+        error!("heree");
+        dbg!("heree");
         tasks.spawn(async move {
+            debug!("Pauline");
             loop {
+                debug!("Pauline");
                 let bundle = {
                     let mut guard = cspcl.lock().expect("Could not lock cspcl to listen");
-                    let (bundle, _, _) = guard.recv_bundle(1000).unwrap();
+                    let bundle = match guard.recv_bundle(1000) {
+                        Ok((bundle, _, __)) => bundle,
+                        Err(_) => continue,
+                    };
                     bundle
                 };
                 sink.dispatch(bundle.into(), None, None).await.unwrap();
