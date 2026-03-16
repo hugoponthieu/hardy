@@ -11,6 +11,10 @@ crate-type = ["rlib"]
 name = "bp"
 path = "src/bp.rs"
 
+[[bin]]
+name = "bpa-send"
+path = "src/bpa_send.rs"
+
 [features]
 tracing = ["hardy-bpa/tracing","hardy-tcpclv4/tracing"]
 
@@ -19,6 +23,7 @@ anyhow = "1.0.102"
 hardy-bpa = { path = "../bpa" }
 hardy-bpv7 = { path = "../bpv7", features = ["std"] }
 hardy-cbor = { path = "../cbor" }
+hardy-proto = { path = "../proto" }
 hardy-tcpclv4 = { path = "../tcpclv4" }
 clap = { version = "4.6.0", features = ["derive"] }
 humantime = "2.3.0"

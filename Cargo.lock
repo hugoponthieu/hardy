@@ -2240,6 +2240,7 @@ dependencies = [
  "hardy-bpa",
  "hardy-bpv7",
  "hardy-cbor",
+ "hardy-proto",
  "hardy-tcpclv4",
  "humantime",
  "libc",

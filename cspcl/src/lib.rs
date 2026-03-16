@@ -12,6 +12,7 @@ struct ClaInner {
     sink: Arc<dyn hardy_bpa::cla::Sink>,
     node_ids: Arc<[NodeId]>,
     cspcl: Arc<Mutex<Cspcl>>,
+    peers: Arc<[config::PeerConfig]>,
 }
 
 pub struct Cla {

@@ -114,6 +114,11 @@ interface = { Can = "vcan0" }
 
 local_addr = 2
 local_port = 3
+
+#[[clas.peers]]
+#node_ids = ["ipn:1.0"]
+#remote_addr = 1
+#remote_port = 3
 # --- TCPCLv4 Configuration (`type = "tcpclv4"`) ---
 # The local IP address and port for the CLA to listen on for incoming connections.
 #address = "[::]:4556"

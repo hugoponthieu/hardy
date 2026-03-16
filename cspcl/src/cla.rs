@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use cspcl::Cspcl;
+use cspcl::{Cspcl, cspcl_sys};
 use hardy_async::TaskPool;
 use hardy_bpa::{
     Bytes, async_trait,
@@ -11,24 +11,52 @@ use tracing::{debug, error, info};
 use crate::{Cla, ClaInner};
 
 impl ClaInner {
+    fn recv_bundle(cspcl: &mut Cspcl, timeout_ms: u32) -> cspcl::Result<(Vec<u8>, u8, u8)> {
+        let mut buffer = vec![0u8; cspcl_sys::CSPCL_MAX_BUNDLE_SIZE as usize];
+        let mut len = buffer.len();
+        let mut src_addr: u8 = 0;
+        let mut src_port: u8 = 0;
+
+        unsafe {
+            cspcl::Error::from_code(cspcl_sys::cspcl_recv_bundle(
+                cspcl.inner_mut(),
+                buffer.as_mut_ptr(),
+                &mut len,
+                &mut src_addr,
+                &mut src_port,
+                timeout_ms,
+            ))?;
+        }
+
+        buffer.truncate(len);
+        Ok((buffer, src_addr, src_port))
+    }
+
     fn start_listener(&self, tasks: &Arc<TaskPool>) {
         let cspcl = Arc::clone(&self.cspcl);
         let sink = Arc::clone(&self.sink);
-        error!("heree");
-        dbg!("heree");
+        let peers = Arc::clone(&self.peers);
         tasks.spawn(async move {
-            debug!("Pauline");
             loop {
-                debug!("Pauline");
-                let bundle = {
+                let (bundle, src_addr, src_port) = {
                     let mut guard = cspcl.lock().expect("Could not lock cspcl to listen");
-                    let bundle = match guard.recv_bundle(1000) {
-                        Ok((bundle, _, __)) => bundle,
+                    match Self::recv_bundle(&mut guard, 1000) {
+                        Ok(bundle) => bundle,
                         Err(_) => continue,
-                    };
-                    bundle
+                    }
                 };
-                sink.dispatch(bundle.into(), None, None).await.unwrap();
+                let peer = peers
+                    .iter()
+                    .find(|peer| peer.remote_addr == src_addr && peer.remote_port == src_port);
+                let peer_node = peer.and_then(|peer| peer.node_ids.first());
+                let peer_addr = hardy_bpa::cla::ClaAddress::Csp(src_addr, src_port);
+
+                if let Err(err) = sink
+                    .dispatch(bundle.into(), peer_node, Some(&peer_addr))
+                    .await
+                {
+                    error!("Failed to dispatch bundle from CSP peer {src_addr}:{src_port}: {err}");
+                }
             }
         });
     }
@@ -53,9 +81,36 @@ impl hardy_bpa::cla::Cla for Cla {
             sink: sink.into(),
             node_ids: node_ids.into(),
             cspcl,
+            peers: self.config.peers.clone().into(),
         });
 
         if let Some(cla_inner) = self.inner.get() {
+            for peer in &self.config.peers {
+                let peer_addr = ClaAddress::Csp(peer.remote_addr, peer.remote_port);
+                match cla_inner
+                    .sink
+                    .add_peer(peer_addr.clone(), &peer.node_ids)
+                    .await
+                {
+                    Ok(true) => {
+                        info!(
+                            "Registered CSP peer {} at {}",
+                            peer.node_ids
+                                .first()
+                                .map(ToString::to_string)
+                                .unwrap_or_else(|| "<unknown>".to_string()),
+                            peer_addr
+                        );
+                    }
+                    Ok(false) => {
+                        debug!("CSP peer {peer_addr} already registered");
+                    }
+                    Err(err) => {
+                        error!("Failed to register CSP peer {peer_addr}: {err}");
+                    }
+                }
+            }
+
             cla_inner.start_listener(&self.tasks);
         };
     }

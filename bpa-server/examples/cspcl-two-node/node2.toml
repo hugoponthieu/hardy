@@ -1,0 +1,30 @@
+log-level = "info"
+node-ids = "ipn:2.0"
+
+[grpc]
+address = "[::1]:50062"
+services = ["application", "cla", "service"]
+
+[storage.metadata]
+type = "memory"
+
+[storage.bundle]
+type = "memory"
+
+[built-in-services]
+echo = [7]
+
+[static-routes]
+routes-file = "./bpa-server/examples/cspcl-two-node/node2.routes"
+
+[[clas]]
+name = "cspcl1"
+type = "cspcl"
+interface = { Can = "vcan0" }
+local_addr = 2
+local_port = 10
+
+[[clas.peers]]
+node_ids = ["ipn:1.0"]
+remote_addr = 1
+remote_port = 10
