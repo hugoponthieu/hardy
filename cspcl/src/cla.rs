@@ -1,11 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use cspcl::{Cspcl, cspcl_sys};
 use hardy_async::TaskPool;
 use hardy_bpa::{
     Bytes, async_trait,
-    cla::{ClaAddress, Error, ForwardBundleResult, Sink},
+    cla::{ClaAddress, ForwardBundleResult, Sink},
 };
+use tokio::task;
+use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
 use crate::{Cla, ClaInner};
@@ -38,11 +40,21 @@ impl ClaInner {
         let peers = Arc::clone(&self.peers);
         tasks.spawn(async move {
             loop {
-                let (bundle, src_addr, src_port) = {
-                    let mut guard = cspcl.lock().expect("Could not lock cspcl to listen");
-                    match Self::recv_bundle(&mut guard, 1000) {
-                        Ok(bundle) => bundle,
-                        Err(_) => continue,
+                let recv_result = {
+                    let cspcl = Arc::clone(&cspcl);
+                    task::spawn_blocking(move || {
+                        let mut guard = cspcl.blocking_lock();
+                        Self::recv_bundle(&mut guard, 1000)
+                    })
+                    .await
+                };
+
+                let (bundle, src_addr, src_port) = match recv_result {
+                    Ok(Ok(bundle)) => bundle,
+                    Ok(Err(_)) => continue,
+                    Err(err) => {
+                        error!("CSP listener task failed: {err}");
+                        continue;
                     }
                 };
                 let peer = peers
@@ -50,6 +62,12 @@ impl ClaInner {
                     .find(|peer| peer.remote_addr == src_addr && peer.remote_port == src_port);
                 let peer_node = peer.and_then(|peer| peer.node_ids.first());
                 let peer_addr = hardy_bpa::cla::ClaAddress::Csp(src_addr, src_port);
+
+                info!(
+                    "Received bundle over CSP from {src_addr}:{src_port} ({} bytes) peer_node={:?}",
+                    bundle.len(),
+                    peer_node
+                );
 
                 if let Err(err) = sink
                     .dispatch(bundle.into(), peer_node, Some(&peer_addr))
@@ -132,14 +150,29 @@ impl hardy_bpa::cla::Cla for Cla {
 
         // TODO: Define elemenent for the csp addr
         if let ClaAddress::Csp(remote_addr, remote_port) = cla_addr {
-            info!("Forwarding bundle to CSPCL peer at {remote_addr}");
-            let mut cspcl = inner
-                .cspcl
-                .lock()
-                .expect("Could not acquire lock on cspcl instance");
-            let _sent_data = cspcl
-                .send_bundle(&bundle, *remote_addr, *remote_port)
-                .map_err(|e| Error::Internal(e.into()))?;
+            info!(
+                "Forwarding bundle over CSP to {remote_addr}:{remote_port} ({} bytes)",
+                bundle.len()
+            );
+
+            let send_result = {
+                let cspcl = Arc::clone(&inner.cspcl);
+                let bundle = bundle.clone();
+                let remote_addr = *remote_addr;
+                let remote_port = *remote_port;
+
+                task::spawn_blocking(move || {
+                    let mut cspcl = cspcl.blocking_lock();
+                    cspcl.send_bundle(&bundle, remote_addr, remote_port)
+                })
+                .await
+            };
+
+            match send_result {
+                Ok(Ok(())) => debug!("Bundle sent"),
+                Ok(Err(e)) => error!("Could not forward bundle: {e}"),
+                Err(err) => error!("CSP send task failed: {err}"),
+            }
             return Ok(ForwardBundleResult::Sent);
         }
         Ok(ForwardBundleResult::NoNeighbour)

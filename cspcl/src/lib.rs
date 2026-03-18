@@ -1,6 +1,7 @@
 use cspcl::Cspcl;
 use hardy_bpv7::eid::NodeId;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::config::Config;
 
