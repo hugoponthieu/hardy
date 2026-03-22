@@ -73,7 +73,7 @@ impl Rib {
         self.tasks.shutdown().await;
     }
 
-    async fn notify_updated(&self) {
+    pub(crate) async fn notify_updated(&self) {
         self.poll_waiting_notify.notify_one();
     }
 

@@ -17,6 +17,7 @@ use hardy_bpv7::{
 };
 use hardy_proto::client::RemoteBpa;
 use tokio::sync::{Notify, oneshot};
+use tracing_subscriber::fmt;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Send one payload into a BPA over gRPC")]
@@ -29,8 +30,8 @@ struct Cli {
     #[arg(long)]
     destination: Eid,
 
-    /// Local IPN service number to register before sending
-    #[arg(long, default_value_t = 123)]
+    /// Local IPN service number to register before sending (0 = auto-assign)
+    #[arg(long, default_value_t = 0)]
     source_service: u32,
 
     /// Payload to send as UTF-8 text
@@ -151,30 +152,65 @@ fn render_payload(bytes: &[u8]) -> String {
     }
 }
 
+fn describe_source_service(service_number: u32) -> String {
+    if service_number == 0 {
+        "auto-assigned source service".to_string()
+    } else {
+        format!("source service {service_number}")
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    fmt().with_max_level(tracing::Level::INFO).init();
+
     let cli = Cli::parse();
     let remote_bpa = RemoteBpa::new(cli.grpc.clone());
 
+    dbg!(cli.wait);
     let (reply_tx, reply_rx) = oneshot::channel();
     let app = Arc::new(App::new(reply_tx));
 
     println!(
-        "connecting to BPA gRPC at {} and registering source service {}",
-        cli.grpc, cli.source_service
+        "connecting to BPA gRPC at {} and registering {}",
+        cli.grpc,
+        describe_source_service(cli.source_service)
     );
     let source_eid = tokio::time::timeout(
         cli.register_timeout,
         remote_bpa.register_application(Some(Service::Ipn(cli.source_service)), app.clone()),
     )
     .await
-    .map_err(|_| anyhow!("timed out registering application after {:?}", cli.register_timeout))?
-    .with_context(|| format!("failed to register application on {}", cli.grpc))?;
+    .map_err(|_| {
+        anyhow!(
+            "timed out registering application after {:?}",
+            cli.register_timeout
+        )
+    })?
+    .with_context(|| {
+        if cli.source_service == 0 {
+            format!(
+                "failed to register auto-assigned application on {}",
+                cli.grpc
+            )
+        } else {
+            format!(
+                "failed to register application on {} with source service {}. \
+retry with --source-service 0 for an auto-assigned service, or pick a different explicit value",
+                cli.grpc, cli.source_service
+            )
+        }
+    })?;
 
     println!("waiting for application sink");
     let sink = tokio::time::timeout(cli.register_timeout, app.sink())
         .await
-        .map_err(|_| anyhow!("timed out waiting for application sink after {:?}", cli.register_timeout))?;
+        .map_err(|_| {
+            anyhow!(
+                "timed out waiting for application sink after {:?}",
+                cli.register_timeout
+            )
+        })?;
     println!("application sink ready");
     let bundle_id = sink
         .send(
@@ -195,7 +231,7 @@ async fn main() -> Result<()> {
     println!("to: {}", cli.destination);
     println!("payload: {}", cli.payload);
 
-    if let Some(wait_for) = cli.wait {
+    let result = if let Some(wait_for) = cli.wait {
         match tokio::time::timeout(wait_for, reply_rx).await {
             Ok(Ok(reply)) => {
                 println!(
@@ -204,12 +240,15 @@ async fn main() -> Result<()> {
                     reply.ack_requested,
                     render_payload(&reply.payload)
                 );
+                Ok(())
             }
-            Ok(Err(_)) => return Err(anyhow!("reply channel closed before a payload arrived")),
-            Err(_) => return Err(anyhow!("timed out waiting for reply after {:?}", wait_for)),
+            Ok(Err(_)) => Err(anyhow!("reply channel closed before a payload arrived")),
+            Err(_) => Err(anyhow!("timed out waiting for reply after {:?}", wait_for)),
         }
-    }
+    } else {
+        Ok(())
+    };
 
     sink.unregister().await;
-    Ok(())
+    result
 }

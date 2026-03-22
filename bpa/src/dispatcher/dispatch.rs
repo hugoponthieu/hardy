@@ -350,12 +350,22 @@ impl Dispatcher {
                 }
             }
             Some(rib::FindResult::Forward(peer)) => {
-                debug!("Queuing bundle for forwarding to CLA peer {peer}");
+                debug!(
+                    "Routing decision: bundle {} to {} via peer {} next_hop={:?}",
+                    bundle.bundle.id,
+                    bundle.bundle.destination,
+                    peer,
+                    bundle.metadata.read_only.next_hop
+                );
                 self.cla_registry.forward(peer, bundle).await
             }
             _ => {
                 // No route available - wait for one
-                debug!("Storing bundle until a forwarding opportunity arises");
+                debug!(
+                    "No route available for bundle {} to {}, storing until a forwarding opportunity arises",
+                    bundle.bundle.id,
+                    bundle.bundle.destination
+                );
 
                 self.store
                     .update_status(&mut bundle, BundleStatus::Waiting)

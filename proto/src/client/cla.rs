@@ -177,7 +177,23 @@ pub async fn register_cla(
         })?;
 
     // Create a channel for sending messages to the service.
-    let (mut channel_sender, rx) = tokio::sync::mpsc::channel(16);
+    let (channel_sender, rx) = tokio::sync::mpsc::channel(16);
+
+    let register_msg = cla_to_bpa::Msg::Register(RegisterClaRequest {
+        name: name.clone(),
+        address_type: address_type.map(|a| {
+            match a {
+                hardy_bpa::cla::ClaAddressType::Tcp => ClaAddressType::Tcp,
+                hardy_bpa::cla::ClaAddressType::Private => ClaAddressType::Private,
+                hardy_bpa::cla::ClaAddressType::Csp => ClaAddressType::Csp,
+            }
+            .into()
+        }),
+    });
+    channel_sender
+        .send(ClaToBpa::compose(0, register_msg))
+        .await
+        .map_err(|e| hardy_bpa::cla::Error::Internal(e.into()))?;
 
     // Call the service's streaming method
     let mut channel_receiver = cla_client
@@ -189,35 +205,26 @@ pub async fn register_cla(
         })?
         .into_inner();
 
-    // Send the initial registration message.
-    let response = match RpcProxy::send(
-        &mut channel_sender,
-        &mut channel_receiver,
-        cla_to_bpa::Msg::Register(RegisterClaRequest {
-            name: name.clone(),
-            address_type: address_type.map(|a| {
-                match a {
-                    hardy_bpa::cla::ClaAddressType::Tcp => ClaAddressType::Tcp,
-                    hardy_bpa::cla::ClaAddressType::Private => ClaAddressType::Private,
-                    hardy_bpa::cla::ClaAddressType::Csp => ClaAddressType::Csp,
-                }
-                .into()
-            }),
-        }),
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to send registration: {e}");
-        hardy_bpa::cla::Error::Internal(e.into())
-    })? {
+    let response = match channel_receiver
+        .message()
+        .await
+        .map_err(|e| hardy_bpa::cla::Error::Internal(e.into()))?
+    {
         None => return Err(hardy_bpa::cla::Error::Disconnected),
-        Some(bpa_to_cla::Msg::Register(response)) => response,
-        Some(msg) => {
-            error!("CLA Registration failed: Unexpected response: {msg:?}");
+        Some(msg) if msg.msg_id() != 0 => {
             return Err(hardy_bpa::cla::Error::Internal(
-                tonic::Status::internal(format!("Unexpected response: {msg:?}")).into(),
+                tonic::Status::aborted("Out of sequence response").into(),
             ));
         }
+        Some(msg) => match msg.msg().map_err(|e| hardy_bpa::cla::Error::Internal(e.into()))? {
+            bpa_to_cla::Msg::Register(response) => response,
+            msg => {
+                error!("CLA Registration failed: Unexpected response: {msg:?}");
+                return Err(hardy_bpa::cla::Error::Internal(
+                    tonic::Status::internal(format!("Unexpected response: {msg:?}")).into(),
+                ));
+            }
+        },
     };
 
     let node_ids = response

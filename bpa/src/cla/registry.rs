@@ -307,8 +307,18 @@ impl Registry {
     }
 
     pub async fn forward(&self, peer_id: u32, bundle: bundle::Bundle) {
+        debug!(
+            "Submitting bundle {} for peer {} destination {}",
+            bundle.bundle.id,
+            peer_id,
+            bundle.bundle.destination
+        );
         if let Err(bundle) = self.peers.forward(peer_id, bundle).await {
-            debug!("CLA forward failed, returning bundle to watch queue");
+            debug!(
+                "CLA forward setup failed for bundle {} peer {}, returning bundle to watch queue",
+                bundle.bundle.id,
+                peer_id
+            );
             self.store.watch_bundle(bundle).await;
         }
     }

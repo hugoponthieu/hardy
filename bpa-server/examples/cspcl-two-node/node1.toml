@@ -1,4 +1,4 @@
-log-level = "info"
+log-level = "debug"
 node-ids = "ipn:1.0"
 
 [grpc]
@@ -11,8 +11,8 @@ type = "memory"
 [storage.bundle]
 type = "memory"
 
-[built-in-services]
-echo = [7]
+# [built-in-services]
+# echo = [7]
 
 [static-routes]
 routes-file = "./bpa-server/examples/cspcl-two-node/node1.routes"

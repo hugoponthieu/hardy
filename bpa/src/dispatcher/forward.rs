@@ -16,6 +16,15 @@ impl Dispatcher {
             return;
         };
 
+        debug!(
+            "Dequeued bundle {} for peer {} queue {:?} via {} ({} bytes)",
+            bundle.bundle.id,
+            peer,
+            queue,
+            cla_addr,
+            data.len()
+        );
+
         // Increment Hop Count, etc...
         // We ignore the fact that a new bundle has been created, as it makes no difference below
         let data = match self.update_extension_blocks(&bundle, &data) {
@@ -68,7 +77,9 @@ impl Dispatcher {
             }
         }
 
-        self.store.reset_peer_queue(peer).await;
+        if self.store.reset_peer_queue(peer).await {
+            self.rib.notify_updated().await;
+        }
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all,fields(bundle.id = %bundle.bundle.id)))]

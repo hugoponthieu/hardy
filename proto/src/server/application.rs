@@ -237,6 +237,7 @@ impl application_server::Application for Service {
         &self,
         request: tonic::Request<tonic::Streaming<AppToBpa>>,
     ) -> Result<tonic::Response<Self::RegisterStream>, tonic::Status> {
+        info!("Application gRPC register stream opened");
         let (mut channel_sender, rx) = tokio::sync::mpsc::channel(self.channel_size);
         let mut channel_receiver = request.into_inner();
 
@@ -247,6 +248,10 @@ impl application_server::Application for Service {
         RpcProxy::recv(&mut channel_sender, &mut channel_receiver, |msg| async {
             match msg {
                 app_to_bpa::Msg::Register(request) => {
+                    info!(
+                        "Application registration request received for service_id={:?}",
+                        request.service_id
+                    );
                     // Register the Service and respond
                     let endpoint_id = self
                         .bpa
@@ -267,6 +272,8 @@ impl application_server::Application for Service {
                         .await
                         .map(|endpoint_id| endpoint_id.to_string())
                         .map_err(|e| tonic::Status::from_error(e.into()))?;
+
+                    info!("Application registration completed with endpoint_id={endpoint_id}");
 
                     Ok(bpa_to_app::Msg::Register(RegisterResponse { endpoint_id }))
                 }

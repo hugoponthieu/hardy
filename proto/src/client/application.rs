@@ -251,7 +251,21 @@ pub async fn register_application_service(
         })?;
 
     // Create a channel for sending messages to the service.
-    let (mut channel_sender, rx) = tokio::sync::mpsc::channel(16);
+    let (channel_sender, rx) = tokio::sync::mpsc::channel(16);
+
+    // Queue the initial registration message before opening the bidi stream.
+    // The server waits for this first frame before returning the stream response.
+    info!("Queueing application registration request for service_id={service_id:?}");
+    let register_msg = app_to_bpa::Msg::Register(RegisterRequest {
+        service_id: service_id.map(|service_id| match service_id {
+            eid::Service::Ipn(service_number) => register_request::ServiceId::Ipn(service_number),
+            eid::Service::Dtn(service_name) => register_request::ServiceId::Dtn(service_name.into()),
+        }),
+    });
+    channel_sender
+        .send(AppToBpa::compose(0, register_msg))
+        .await
+        .map_err(|e| hardy_bpa::services::Error::Internal(e.into()))?;
 
     // Call the service's streaming method
     let mut channel_receiver = app_client
@@ -263,35 +277,34 @@ pub async fn register_application_service(
         })?
         .into_inner();
 
-    // Send the initial registration message.
-    let response = match RpcProxy::send(
-        &mut channel_sender,
-        &mut channel_receiver,
-        app_to_bpa::Msg::Register(RegisterRequest {
-            service_id: service_id.map(|service_id| match service_id {
-                eid::Service::Ipn(service_number) => {
-                    register_request::ServiceId::Ipn(service_number)
-                }
-                eid::Service::Dtn(service_name) => {
-                    register_request::ServiceId::Dtn(service_name.into())
-                }
-            }),
-        }),
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to send registration: {e}");
-        hardy_bpa::services::Error::Internal(e.into())
-    })? {
+    info!("Application client stream established to {grpc_addr}");
+
+    let response = match channel_receiver
+        .message()
+        .await
+        .map_err(|e| hardy_bpa::services::Error::Internal(e.into()))?
+    {
         None => return Err(hardy_bpa::services::Error::Disconnected),
-        Some(bpa_to_app::Msg::Register(response)) => response,
-        Some(msg) => {
-            error!("Service Registration failed: Unexpected response: {msg:?}");
+        Some(msg) if msg.msg_id() != 0 => {
             return Err(hardy_bpa::services::Error::Internal(
-                tonic::Status::internal(format!("Unexpected response: {msg:?}")).into(),
+                tonic::Status::aborted("Out of sequence response").into(),
             ));
         }
+        Some(msg) => match msg
+            .msg()
+            .map_err(|e| hardy_bpa::services::Error::Internal(e.into()))?
+        {
+            bpa_to_app::Msg::Register(response) => response,
+            msg => {
+                error!("Service Registration failed: Unexpected response: {msg:?}");
+                return Err(hardy_bpa::services::Error::Internal(
+                    tonic::Status::internal(format!("Unexpected response: {msg:?}")).into(),
+                ));
+            }
+        },
     };
+
+    info!("Application registration response received: endpoint_id={}", response.endpoint_id);
 
     let eid = response
         .endpoint_id

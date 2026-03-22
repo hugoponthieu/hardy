@@ -209,7 +209,18 @@ pub async fn register_endpoint_service(
         })?;
 
     // Create a channel for sending messages to the service.
-    let (mut channel_sender, rx) = tokio::sync::mpsc::channel(16);
+    let (channel_sender, rx) = tokio::sync::mpsc::channel(16);
+
+    let register_msg = service_to_bpa::Msg::Register(RegisterRequest {
+        service_id: service_id.map(|service_id| match service_id {
+            eid::Service::Ipn(service_number) => register_request::ServiceId::Ipn(service_number),
+            eid::Service::Dtn(service_name) => register_request::ServiceId::Dtn(service_name.into()),
+        }),
+    });
+    channel_sender
+        .send(ServiceToBpa::compose(0, register_msg))
+        .await
+        .map_err(|e| hardy_bpa::services::Error::Internal(e.into()))?;
 
     // Call the service's streaming method
     let mut channel_receiver = svc_client
@@ -221,34 +232,29 @@ pub async fn register_endpoint_service(
         })?
         .into_inner();
 
-    // Send the initial registration message.
-    let response = match RpcProxy::send(
-        &mut channel_sender,
-        &mut channel_receiver,
-        service_to_bpa::Msg::Register(RegisterRequest {
-            service_id: service_id.map(|service_id| match service_id {
-                eid::Service::Ipn(service_number) => {
-                    register_request::ServiceId::Ipn(service_number)
-                }
-                eid::Service::Dtn(service_name) => {
-                    register_request::ServiceId::Dtn(service_name.into())
-                }
-            }),
-        }),
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to send registration: {e}");
-        hardy_bpa::services::Error::Internal(e.into())
-    })? {
+    let response = match channel_receiver
+        .message()
+        .await
+        .map_err(|e| hardy_bpa::services::Error::Internal(e.into()))?
+    {
         None => return Err(hardy_bpa::services::Error::Disconnected),
-        Some(bpa_to_service::Msg::Register(response)) => response,
-        Some(msg) => {
-            error!("Service Registration failed: Unexpected response: {msg:?}");
+        Some(msg) if msg.msg_id() != 0 => {
             return Err(hardy_bpa::services::Error::Internal(
-                tonic::Status::internal(format!("Unexpected response: {msg:?}")).into(),
+                tonic::Status::aborted("Out of sequence response").into(),
             ));
         }
+        Some(msg) => match msg
+            .msg()
+            .map_err(|e| hardy_bpa::services::Error::Internal(e.into()))?
+        {
+            bpa_to_service::Msg::Register(response) => response,
+            msg => {
+                error!("Service Registration failed: Unexpected response: {msg:?}");
+                return Err(hardy_bpa::services::Error::Internal(
+                    tonic::Status::internal(format!("Unexpected response: {msg:?}")).into(),
+                ));
+            }
+        },
     };
 
     let eid = response
