@@ -1,7 +1,7 @@
 use super::*;
 
 impl Dispatcher {
-    #[cfg_attr(feature = "tracing", instrument(skip(self,cla,bundle),fields(bundle.id = %bundle.bundle.id)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self,cla,bundle),fields(bundle.id = %bundle.bundle.id)))]
     pub async fn forward_bundle(
         &self,
         cla: &dyn cla::Cla,
@@ -82,7 +82,7 @@ impl Dispatcher {
         }
     }
 
-    #[cfg_attr(feature = "tracing", instrument(skip_all,fields(bundle.id = %bundle.bundle.id)))]
+    #[cfg_attr(feature = "instrument", instrument(skip_all,fields(bundle.id = %bundle.bundle.id)))]
     fn update_extension_blocks(
         &self,
         bundle: &bundle::Bundle,

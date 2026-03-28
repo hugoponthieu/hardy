@@ -311,6 +311,100 @@ fn dtn_parse(s: &str, expected: DtnPatternItem) {
     }
 }
 
+#[test]
+fn test_specificity_score() {
+    // IPN fully specific: allocator(32) + node(32) + service(32) = 96, exact → 256 + 96
+    assert_eq!(score("ipn:100.1.5"), Some(352));
+
+    // IPN service wildcard: allocator(32) + node(32) + service(0) = 64, not exact
+    assert_eq!(score("ipn:100.1.*"), Some(64));
+
+    // IPN node+service wildcard: allocator(32) + node(0) + service(0) = 32
+    assert_eq!(score("ipn:100.*.*"), Some(32));
+
+    // IPN range node: allocator(32) + node [10-13] 4 values (30) + service(0) = 62
+    assert_eq!(score("ipn:100.[10-13].*"), Some(62));
+
+    // IPN all wildcard → 0
+    assert_eq!(score("ipn:*.*.*"), Some(0));
+
+    // ipn:** (ANY pattern item) → 0
+    assert_eq!(score("ipn:**"), Some(0));
+
+    // *:** (EidPattern::Any) → 0
+    assert_eq!(
+        "*:**".parse::<EidPattern>().unwrap().specificity_score(),
+        Some(0)
+    );
+
+    #[cfg(feature = "dtn-pat-item")]
+    {
+        // DTN exact: authority(18) + service(3) = 21 literal chars, exact → 256 + 21
+        assert_eq!(score("dtn://rover1.example.org/svc"), Some(277));
+
+        // DTN glob: 18 literal chars across full pattern (authority + separator)
+        assert_eq!(score("dtn://rover*.example.org/**"), Some(18));
+
+        // DTN none → exact, 0 literal → 256
+        assert_eq!(score("dtn:none"), Some(256));
+
+        // DTN any → 0
+        assert_eq!(score("dtn:**"), Some(0));
+    }
+
+    // Invalid: wildcard allocator with non-wildcard node
+    assert_eq!(score("ipn:*.1.*"), None);
+
+    // Invalid: range allocator with specific node
+    assert_eq!(score("ipn:[100-200].1.*"), None);
+
+    // Invalid: wildcard node with specific service
+    assert_eq!(score("ipn:100.*.5"), None);
+
+    // Invalid: range node with specific service
+    assert_eq!(score("ipn:100.[10-13].5"), None);
+
+    // Invalid: union set (multiple items)
+    assert_eq!(
+        "ipn:100.1.*|ipn:200.1.*"
+            .parse::<EidPattern>()
+            .unwrap()
+            .specificity_score(),
+        None
+    );
+}
+
+fn score(s: &str) -> Option<u32> {
+    s.parse::<EidPattern>()
+        .expect("Failed to parse")
+        .specificity_score()
+}
+
+#[test]
+fn test_specificity_ordering() {
+    use alloc::collections::BTreeSet;
+
+    let exact: EidPattern = "ipn:100.1.5".parse().unwrap(); // score 352
+    let svc_wild: EidPattern = "ipn:100.1.*".parse().unwrap(); // score 64
+    let node_wild: EidPattern = "ipn:100.*.*".parse().unwrap(); // score 32
+    let any: EidPattern = "*:**".parse().unwrap(); // score 0
+
+    // Higher score = Less (comes first)
+    assert!(exact < svc_wild);
+    assert!(svc_wild < node_wild);
+    assert!(node_wild < any);
+
+    // BTreeSet iteration = most specific first
+    let mut set = BTreeSet::new();
+    set.insert(any.clone());
+    set.insert(node_wild.clone());
+    set.insert(exact.clone());
+    set.insert(svc_wild.clone());
+
+    let ordered: Vec<_> = set.into_iter().collect();
+    assert_eq!(ordered, vec![exact, svc_wild, node_wild, any]);
+}
+
 /// Helper to parse pattern and check subset relationship
 fn is_subset(lhs: &str, rhs: &str) -> bool {
     let lhs_pattern: EidPattern = lhs.parse().expect("Failed to parse lhs");

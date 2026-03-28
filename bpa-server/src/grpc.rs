@@ -21,20 +21,24 @@ impl Default for Config {
 }
 
 #[cfg(feature = "grpc")]
-pub fn init(config: &Config, bpa: &Arc<hardy_bpa::bpa::Bpa>, tasks: &hardy_async::TaskPool) {
-    // Convert to proto server config
+pub fn init(
+    config: &Config,
+    bpa: &Arc<dyn hardy_bpa::bpa::BpaRegistration>,
+    tasks: &hardy_async::TaskPool,
+) {
     let proto_config = hardy_proto::server::Config {
         address: config.address,
         services: config.services.clone(),
     };
 
-    // Bpa implements BpaRegistration, so we can pass it as dyn BpaRegistration
-    let bpa: Arc<dyn hardy_bpa::bpa::BpaRegistration> = bpa.clone();
-
-    hardy_proto::server::init(&proto_config, &bpa, tasks);
+    hardy_proto::server::init(&proto_config, bpa, tasks);
 }
 
 #[cfg(not(feature = "grpc"))]
-pub fn init(_config: &Config, _bpa: &Arc<hardy_bpa::bpa::Bpa>, _tasks: &hardy_async::TaskPool) {
+pub fn init(
+    _config: &Config,
+    _bpa: &Arc<dyn hardy_bpa::bpa::BpaRegistration>,
+    _tasks: &hardy_async::TaskPool,
+) {
     warn!("Ignoring gRPC configuration as it is disabled at compile time");
 }

@@ -152,10 +152,23 @@ BPA_BIN="$WORKSPACE_DIR/target/release/hardy-bpa-server"
 # Build if needed
 if [ -z "$SKIP_BUILD_FLAG" ]; then
     log_info "Building Hardy..."
-    (cd "$WORKSPACE_DIR" && cargo build --release -p hardy-tools -p hardy-bpa-server) || {
+    # Build with dynamic-plugins so ION test can use --cla for plugin CLA
+    (cd "$WORKSPACE_DIR" && cargo build --release \
+        -p hardy-tools --features hardy-tools/dynamic-plugins \
+        -p hardy-bpa-server --features hardy-bpa-server/dynamic-plugins) || {
         log_warn "Build failed, skipping Hardy baseline"
         RESULTS+=("Hardy|-|-|-|-|Build failed|-|")
     }
+
+    # Build the MTCP/STCP CLA plugin for ION interop
+    MTCP_CLA_DIR="$SCRIPT_DIR/mtcp"
+    if [ -d "$MTCP_CLA_DIR" ]; then
+        log_info "Building MTCP/STCP CLA plugin..."
+        (cd "$MTCP_CLA_DIR" && cargo build --release) || {
+            log_warn "MTCP CLA plugin build failed, ION test may be skipped"
+        }
+    fi
+
     SKIP_BUILD_FLAG="--skip-build"
 fi
 
@@ -263,6 +276,21 @@ else
     log_warn "DTNME test script not found, skipping"
 fi
 
+# ION
+if [ -x "$SCRIPT_DIR/ION/test_ion_ping.sh" ]; then
+    if docker image inspect ion-interop &>/dev/null; then
+        log_step "Running ION test..."
+        OUTPUT=$("$SCRIPT_DIR/ION/test_ion_ping.sh" $SKIP_BUILD_FLAG --count "$PING_COUNT" 2>&1) || true
+        extract_rtt_stats "$OUTPUT" "ION"
+        log_info "ION complete"
+    else
+        log_warn "ion-interop Docker image not found, skipping"
+        RESULTS+=("ION|-|-|-|-|No image|-|")
+    fi
+else
+    log_warn "ION test script not found, skipping"
+fi
+
 # =============================================================================
 # Generate Markdown Table
 # =============================================================================
@@ -332,7 +360,7 @@ OUTPUT_FILE="$SCRIPT_DIR/benchmark_results.md"
     echo ""
     echo "- **Pings**: Received/Transmitted count"
     echo "- **vs Hardy**: Percentage relative to Hardy baseline (100% = same, >100% = slower)"
-    echo "- All tests use TCPCLv4 over localhost"
+    echo "- Most tests use TCPCLv4 over localhost; ION uses STCP via plugin CLA"
     echo "- Hardy baseline runs inline; other tests use existing interop scripts"
     echo ""
     echo "_$PING_COUNT pings per test, generated $(date '+%Y-%m-%d %H:%M:%S')_"

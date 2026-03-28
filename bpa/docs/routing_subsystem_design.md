@@ -11,7 +11,7 @@ This document describes the routing infrastructure in the Bundle Protocol Agent 
 
 ## Overview
 
-The BPA routing system consists of three interconnected components:
+The BPA routing system consists of three interconnected components, driven by pluggable **Routing Agents** that push routes into the RIB via the `RoutingAgent` / `RoutingSink` trait pair (see `bpa/src/routes.rs`):
 
 | Component | Purpose | Key Structure |
 |-----------|---------|---------------|
@@ -28,15 +28,15 @@ There is no separate FIB. Instead, forwarding decisions are recorded in bundle m
                           │                    RIB                      │
                           │                                             │
 ┌──────────────────┐      │  ┌────────────────┐    ┌─────────────────┐  │
-│  Route Sources   │      │  │  Local Table   │    │   Route Table   │  │
-│                  │      │  │                │    │                 │  │
-│  - static_routes │─────►│  │ Eid → Actions  │    │ Priority →      │  │
-│  - control plane │      │  │                │    │   Pattern →     │  │
-│  - CLA peers     │      │  │ - AdminEndpoint│    │     Actions     │  │
-└──────────────────┘      │  │ - Local(svc)   │    │                 │  │
-                          │  │ - Forward(peer)│    │ - Drop          │  │
-                          │  └────────────────┘    │ - Reflect       │  │
-                          │          │             │ - Via(Eid)      │  │
+│ Routing Agents   │      │  │  Local Table   │    │   Route Table   │  │
+│ (RoutingAgent    │      │  │                │    │                 │  │
+│  trait + Sink)   │─────►│  │ Eid → Actions  │    │ Priority →      │  │
+│                  │      │  │                │    │   Pattern →     │  │
+│  - StaticRoutes  │      │  │ - AdminEndpoint│    │     Actions     │  │
+│  - SAND (future) │      │  │ - Local(svc)   │    │                 │  │
+│  - CLA peers     │      │  │ - Forward(peer)│    │ - Drop          │  │
+└──────────────────┘      │  │                │    │ - Reflect       │  │
+                          │  └────────────────┘    │ - Via(Eid)      │  │
                           │          │             └─────────────────┘  │
                           │          │                     │            │
                           │          └──────────┬──────────┘            │
@@ -70,7 +70,7 @@ There is no separate FIB. Instead, forwarding decisions are recorded in bundle m
 
 ### Data Structures
 
-The RIB contains a local endpoint table and a pattern-based route table. The route table uses a three-level nested structure: `BTreeMap<priority, BTreeMap<EidPattern, BTreeSet<Entry>>>`. Lower priority numbers are checked first. Within a priority level, patterns are matched in order.
+The RIB contains a local endpoint table and a pattern-based route table. The route table uses a three-level nested structure: `BTreeMap<priority, BTreeMap<EidPattern, BTreeSet<Entry>>>`. Lower priority numbers are checked first. Within a priority level, patterns are ordered by specificity score (most specific first), so the first matching pattern is always the best match.
 
 Each route entry contains an action (Drop, Reflect, or Via) and a source identifier for debugging (e.g., "static_routes", "control").
 
@@ -82,7 +82,7 @@ Each route entry contains an action (Drop, Reflect, or Via) and a source identif
 | `Reflect` | Return to sender (previous node or source) |
 | `Via(Eid)` | Forward toward the specified EID (recursive lookup) |
 
-When multiple entries match at the same priority, precedence is: Drop > Reflect > Via.
+When multiple entries exist under the same pattern, precedence is: Drop > Reflect > Via. Across patterns at the same priority, the most specific matching pattern takes precedence (highest specificity score wins).
 
 ### Local Table
 
@@ -144,7 +144,8 @@ Local table: NodeId → Forward(peer_id)
 
 2. **Search route table by priority**
    - Iterate priorities low to high
-   - For each priority, match patterns against destination
+   - Within each priority, patterns are ordered by specificity score (descending)
+   - The first matching pattern is the most specific match
    - Stop at first match
 
 3. **Handle Via(eid) recursively**
@@ -154,7 +155,22 @@ Local table: NodeId → Forward(peer_id)
 
 4. **ECMP selection** (if multiple peers)
    - Hash of: bundle source + destination + flow_label
-   - Deterministic peer selection
+   - Uses a per-instance `RandomState` (seeded once at RIB creation) for deterministic peer selection within a BPA instance
+
+### Specificity Scoring
+
+EID patterns have a Harmonized Specificity Score (see `eid-patterns` crate) that determines pattern ordering within a priority level. The score follows the formula `(IsExact × 256) + LiteralLength`, where IsExact is 1 if the pattern contains no wildcards, and LiteralLength measures the information content (bit depth for IPN, character count for DTN).
+
+This gives a two-axis route selection model analogous to IP routing:
+
+| Axis | Mechanism | Analogy |
+|------|-----------|---------|
+| **Primary** | Priority (lower = checked first) | Administrative distance |
+| **Secondary** | Specificity score (higher = preferred) | Longest prefix match |
+
+Priority provides inter-agent ordering (static routes vs DPP vs SAND). Specificity provides intra-priority ordering (more specific patterns win). An operator's explicit `Drop` at a low priority number overrides all learned routes regardless of specificity — a feature not available in IP routing without policy routing.
+
+Patterns with non-monotonic structure (e.g., union sets) receive a specificity score of 0, sorting them with the broadest patterns.
 
 ### FindResult
 
@@ -288,6 +304,43 @@ See also: [Bundle State Machine Design](bundle_state_machine_design.md) for deta
    Success: delete bundle, send forwarded report
    Failure: reset_peer_queue(5), bundle → Waiting
 ```
+
+## Routing Agent API
+
+External routing protocols interact with the RIB through the `RoutingAgent` / `RoutingSink` trait pair defined in `bpa/src/routes.rs`. This follows the same bidirectional Sink pattern used by CLAs and Services.
+
+### Trait Overview
+
+| Trait | Direction | Methods |
+|-------|-----------|---------|
+| `RoutingAgent` | BPA → Agent | `on_register(sink, node_ids)`, `on_unregister()` |
+| `RoutingSink` | Agent → BPA | `add_route(pattern, action, priority)`, `remove_route(...)`, `unregister()` |
+
+The Sink automatically injects the agent's registered name as the route `source`, so each agent can only manage its own routes. When the Sink is dropped, the BPA removes all routes from that agent.
+
+### Registration Flow
+
+```
+Agent                         BPA
+  │                            │
+  │  register_routing_agent()  │
+  │ ──────────────────────────►│
+  │                            │ create Agent + Sink
+  │  on_register(sink, ids)    │
+  │ ◄──────────────────────────│
+  │                            │
+  │  sink.add_route(...)       │
+  │ ──────────────────────────►│ RIB::add()
+  │                            │
+```
+
+### Built-in Agents
+
+- **`StaticRoutingAgent`** — installs a fixed set of routes on registration. Used by `bpa-server/static_routes` and the `ping` tool.
+
+### gRPC Support
+
+Remote routing agents connect via `routing.proto` (bidirectional streaming), with server and client implementations in `proto/src/server/routing.rs` and `proto/src/client/routing.rs`.
 
 ## Synchronization
 

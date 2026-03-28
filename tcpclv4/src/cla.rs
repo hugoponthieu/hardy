@@ -75,7 +75,7 @@ impl Cla {
 
 #[async_trait]
 impl hardy_bpa::cla::Cla for Cla {
-    #[cfg_attr(feature = "tracing", instrument(skip(self, sink)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self, sink)))]
     async fn on_register(&self, sink: Box<dyn hardy_bpa::cla::Sink>, node_ids: &[NodeId]) {
         // Store sink and node_ids in single atomic operation
         self.inner.call_once(|| Inner {
@@ -87,7 +87,7 @@ impl hardy_bpa::cla::Cla for Cla {
         self.start_background_tasks();
     }
 
-    #[cfg_attr(feature = "tracing", instrument(skip(self)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self)))]
     async fn on_unregister(&self) {
         // Cancel sessions first so they exit promptly when channels close
         self.session_cancel_token.cancel();
@@ -99,7 +99,7 @@ impl hardy_bpa::cla::Cla for Cla {
         self.tasks.shutdown().await;
     }
 
-    #[cfg_attr(feature = "tracing", instrument(skip(self, bundle)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self, bundle)))]
     async fn forward(
         &self,
         _queue: Option<u32>,

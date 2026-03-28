@@ -12,7 +12,7 @@ This crate is `no_std` compatible with a heap allocator. Feature flags control f
 - **`tokio`** (default): Enables Tokio runtime support. Implies `std`.
 - **`rfc9173`**: Enables RFC 9173 security contexts via hardy-bpv7.
 - **`serde`**: Enables serialization support for metadata.
-- **`tracing`**: Enables tracing instrumentation.
+- **`instrument`**: Enables span instrumentation.
 
 ## Current Limitations
 
@@ -45,7 +45,6 @@ pub mod bundle;
 pub mod cla;
 pub mod filters;
 pub mod keys;
-pub mod metadata;
 pub mod node_ids;
 pub mod policy;
 pub mod routes;
@@ -59,7 +58,7 @@ use alloc::sync::{Arc, Weak};
 use trace_err::*;
 use tracing::{debug, error, info, warn};
 
-#[cfg(feature = "tracing")]
+#[cfg(feature = "instrument")]
 use tracing::instrument;
 
 // Centralized collections for future no_std compatibility

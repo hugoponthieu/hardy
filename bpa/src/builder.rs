@@ -17,8 +17,9 @@ pub struct BpaBuilder {
     status_reports: bool,
     poll_channel_depth: NonZeroUsize,
     processing_pool_size: NonZeroUsize,
-    lru_capacity: NonZeroUsize,
+    lru_capacity: Option<NonZeroUsize>,
     max_cached_bundle_size: NonZeroUsize,
+    cache_disabled: bool,
     node_ids: NodeIds,
     metadata_storage: Arc<dyn MetadataStorage>,
     bundle_storage: Arc<dyn BundleStorage>,
@@ -31,6 +32,12 @@ impl BpaBuilder {
 
     pub fn bundle_storage(mut self, bundle_storage: Arc<dyn BundleStorage>) -> Self {
         self.bundle_storage = bundle_storage;
+        // Auto-enable cache for non-default (presumably persistent) storage,
+        // unless the caller has explicitly disabled caching.
+        if !self.cache_disabled {
+            self.lru_capacity
+                .get_or_insert(crate::storage::DEFAULT_LRU_CAPACITY);
+        }
         self
     }
 
@@ -55,12 +62,18 @@ impl BpaBuilder {
     }
 
     pub fn lru_capacity(mut self, v: NonZeroUsize) -> Self {
-        self.lru_capacity = v;
+        self.lru_capacity = Some(v);
         self
     }
 
     pub fn max_cached_bundle_size(mut self, v: NonZeroUsize) -> Self {
         self.max_cached_bundle_size = v;
+        self
+    }
+
+    pub fn no_cache(mut self) -> Self {
+        self.lru_capacity = None;
+        self.cache_disabled = true;
         self
     }
 
@@ -78,16 +91,18 @@ impl BpaBuilder {
             self.bundle_storage,
         ));
 
-        let rib = Arc::new(Rib::new(self.node_ids.clone(), store.clone()));
+        let node_ids = Arc::new(self.node_ids);
+
+        let rib = Arc::new(Rib::new(node_ids.clone(), store.clone()));
 
         let cla_registry = Arc::new(ClaRegistry::new(
-            (&self.node_ids).into(),
+            node_ids.clone(),
             self.poll_channel_depth.into(),
             rib.clone(),
             store.clone(),
         ));
         let keys_registry = Arc::new(KeyRegistry::new());
-        let service_registry = Arc::new(ServiceRegistry::new(self.node_ids.clone(), rib.clone()));
+        let service_registry = Arc::new(ServiceRegistry::new(node_ids.clone(), rib.clone()));
         let filter_registry = Arc::new(FilterRegistry::new());
 
         // Auto-register RFC9171 validity filter unless disabled
@@ -110,7 +125,7 @@ impl BpaBuilder {
             self.status_reports,
             self.poll_channel_depth,
             self.processing_pool_size,
-            self.node_ids,
+            node_ids,
             store.clone(),
             cla_registry.clone(),
             rib.clone(),
@@ -135,8 +150,6 @@ impl Default for BpaBuilder {
         let poll_channel_depth = NonZeroUsize::new(16).unwrap();
         let processing_pool_size =
             NonZeroUsize::new(hardy_async::available_parallelism().get() * 4).unwrap();
-        let lru_capacity = NonZeroUsize::new(1024).unwrap();
-        let max_cached_bundle_size = NonZeroUsize::new(16 * 1024).unwrap();
         let node_ids = NodeIds::default();
         let metadata_storage = Arc::new(MetadataMemStorage::new(&Default::default()));
         let bundle_storage = Arc::new(BundleMemStorage::new(&Default::default()));
@@ -145,8 +158,9 @@ impl Default for BpaBuilder {
             status_reports,
             poll_channel_depth,
             processing_pool_size,
-            lru_capacity,
-            max_cached_bundle_size,
+            lru_capacity: None,
+            max_cached_bundle_size: crate::storage::DEFAULT_MAX_CACHED_BUNDLE_SIZE,
+            cache_disabled: false,
             node_ids,
             metadata_storage,
             bundle_storage,

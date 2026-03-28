@@ -1,4 +1,4 @@
-use super::{metadata::*, *};
+use super::*;
 use futures::join;
 use hardy_bpv7::{eid::Eid, status_report::ReasonCode};
 
@@ -24,7 +24,7 @@ pub(crate) struct Dispatcher {
 
     // Config options
     status_reports: bool,
-    node_ids: node_ids::NodeIds,
+    node_ids: Arc<node_ids::NodeIds>,
     poll_channel_depth: usize,
 }
 
@@ -34,7 +34,7 @@ impl Dispatcher {
         status_reports: bool,
         poll_channel_depth: core::num::NonZeroUsize,
         processing_pool_size: core::num::NonZeroUsize,
-        node_ids: node_ids::NodeIds,
+        node_ids: Arc<node_ids::NodeIds>,
         store: Arc<storage::Store>,
         cla_registry: Arc<cla::registry::Registry>,
         rib: Arc<rib::Rib>,
@@ -61,7 +61,7 @@ impl Dispatcher {
         status_reports: bool,
         poll_channel_depth: core::num::NonZeroUsize,
         processing_pool_size: core::num::NonZeroUsize,
-        node_ids: node_ids::NodeIds,
+        node_ids: Arc<node_ids::NodeIds>,
         store: Arc<storage::Store>,
         cla_registry: Arc<cla::registry::Registry>,
         rib: Arc<rib::Rib>,
@@ -76,7 +76,7 @@ impl Dispatcher {
 
         // Create the dispatch queue channel
         let (dispatch_tx, dispatch_rx) =
-            store.channel(BundleStatus::Dispatching, poll_channel_depth_usize);
+            store.channel(bundle::BundleStatus::Dispatching, poll_channel_depth_usize);
 
         let dispatcher = Arc::new(Self {
             tasks: hardy_async::TaskPool::new(),
@@ -106,7 +106,7 @@ impl Dispatcher {
         self.tasks.shutdown().await;
     }
 
-    #[cfg_attr(feature = "tracing", instrument(skip_all))]
+    #[cfg_attr(feature = "instrument", instrument(skip_all))]
     async fn load_data(&self, bundle: &bundle::Bundle) -> Option<Bytes> {
         let storage_name = bundle
             .metadata
@@ -122,7 +122,7 @@ impl Dispatcher {
         }
     }
 
-    #[cfg_attr(feature = "tracing", instrument(skip(self, bundle)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self, bundle)))]
     pub async fn drop_bundle(&self, bundle: bundle::Bundle, reason: Option<ReasonCode>) {
         if let Some(reason) = reason {
             self.report_bundle_deletion(&bundle, reason).await;
@@ -131,7 +131,7 @@ impl Dispatcher {
         self.delete_bundle(bundle).await
     }
 
-    #[cfg_attr(feature = "tracing", instrument(skip(self, bundle)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self, bundle)))]
     pub async fn delete_bundle(&self, bundle: bundle::Bundle) {
         // Delete the bundle from the bundle store
         if let Some(storage_name) = &bundle.metadata.storage_name {

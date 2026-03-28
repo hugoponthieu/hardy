@@ -12,6 +12,12 @@ pub enum ExitCode {
     Error = 2,
 }
 
+/// Returns true if the --cla value looks like a file path (external binary)
+/// rather than a built-in CLA name.
+fn is_external_cla(cla: &str) -> bool {
+    cla.contains('/') || cla.contains('\\')
+}
+
 async fn exec_async(args: &Command) -> anyhow::Result<ExitCode> {
     if !args.quiet {
         eprintln!(
@@ -22,26 +28,45 @@ async fn exec_async(args: &Command) -> anyhow::Result<ExitCode> {
     }
 
     let node_ids = [args.node_id()?].as_slice().try_into().unwrap();
-    let bpa = hardy_bpa::bpa::Bpa::builder()
-        .status_reports(true)
-        .node_ids(node_ids)
-        .build();
+    let bpa = std::sync::Arc::new(
+        hardy_bpa::bpa::Bpa::builder()
+            .status_reports(true)
+            .node_ids(node_ids)
+            .build(),
+    );
 
     // Add a default 'drop' route, we don't want to cache locally
-    bpa.add_route(
+    bpa.register_routing_agent(
         "ping".to_string(),
-        "*:**".parse().unwrap(),
-        hardy_bpa::routes::Action::Drop(Some(
-            hardy_bpv7::status_report::ReasonCode::NoKnownRouteToDestinationFromHere,
-        )),
-        1000,
+        std::sync::Arc::new(hardy_bpa::routes::StaticRoutingAgent::new(&[(
+            "*:**".parse().unwrap(),
+            hardy_bpa::routes::Action::Drop(Some(
+                hardy_bpv7::status_report::ReasonCode::NoKnownRouteToDestinationFromHere,
+            )),
+            1000,
+        )])),
     )
-    .await;
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to register default routes: {e}"))?;
 
     bpa.start(false);
 
-    // Register TCPCLv4 CLA
-    let cla_name = "tcp0".to_string();
+    if is_external_cla(&args.cla) {
+        exec_external_cla(args, &bpa).await
+    } else {
+        exec_builtin_cla(args, &bpa).await
+    }
+}
+
+async fn exec_builtin_cla(
+    args: &Command,
+    bpa: &std::sync::Arc<hardy_bpa::bpa::Bpa>,
+) -> anyhow::Result<ExitCode> {
+    match args.cla.as_str() {
+        "tcpclv4" => {}
+        other => return Err(anyhow::anyhow!("Unknown built-in CLA: '{other}'")),
+    }
+
     let mut tcpclv4_config = hardy_tcpclv4::config::Config {
         address: None,
         session_defaults: hardy_tcpclv4::config::SessionConfig {
@@ -78,20 +103,17 @@ async fn exec_async(args: &Command) -> anyhow::Result<ExitCode> {
 
     let cla = std::sync::Arc::new(
         hardy_tcpclv4::Cla::new(&tcpclv4_config)
-            .map_err(|e| anyhow::anyhow!("Failed to create CLA '{cla_name}': {e}"))?,
+            .map_err(|e| anyhow::anyhow!("Failed to create CLA '{}': {e}", args.cla))?,
     );
 
-    cla.register(&bpa, cla_name.clone(), None)
+    cla.register(bpa.as_ref(), args.cla.clone(), None)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to start CLA '{cla_name}': {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to start CLA '{}': {e}", args.cla))?;
 
     let peer_addr = if let Some(peer) = &args.peer {
         peer.parse()
             .map_err(|e| anyhow::anyhow!("Failed to parse peer address '{}': {e}", peer))?
     } else {
-        // TODO: DNS resolution for EIDs
-        // https://datatracker.ietf.org/doc/draft-ek-dtn-ipn-arpa/
-
         return Err(anyhow::anyhow!(
             "No peer address specified for destination EID, and no DNS support currently available"
         ));
@@ -114,30 +136,125 @@ async fn exec_async(args: &Command) -> anyhow::Result<ExitCode> {
     })?;
 
     // Now add a route if we are targeting a service
-    if args.destination.service().is_some()
-        && !bpa
-            .add_route(
-                "ping".to_string(),
+    if args.destination.service().is_some() {
+        bpa.register_routing_agent(
+            "ping-target".to_string(),
+            std::sync::Arc::new(hardy_bpa::routes::StaticRoutingAgent::new(&[(
                 args.destination.clone().into(),
                 hardy_bpa::routes::Action::Via(peer.into()),
                 1,
-            )
-            .await
-    {
-        return Err(anyhow::anyhow!("Failed to add route"));
+            )])),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to add route: {e}"))?;
     }
 
-    let cancel_token = tokio_util::sync::CancellationToken::new();
-    cancel::listen_for_cancel(&cancel_token);
+    run_ping(args, bpa).await
+}
 
-    let stats = exec_inner(args, &bpa, &cancel_token).await?;
+async fn exec_external_cla(
+    args: &Command,
+    bpa: &std::sync::Arc<hardy_bpa::bpa::Bpa>,
+) -> anyhow::Result<ExitCode> {
+    let bpa_reg: std::sync::Arc<dyn BpaRegistration> = bpa.clone();
 
-    // Stop waiting for cancel
-    cancel_token.cancel();
+    // Start gRPC server with CLA service
+    let tasks = hardy_async::TaskPool::new();
+    let grpc_config = hardy_proto::server::Config {
+        address: args.grpc_listen,
+        services: vec!["cla".to_string()],
+    };
+    hardy_proto::server::init(&grpc_config, &bpa_reg, &tasks);
+
+    // Yield to let the gRPC server task bind and start listening
+    tokio::task::yield_now().await;
+
+    // Spawn the CLA binary as a subprocess
+    let mut cmd = tokio::process::Command::new(&args.cla);
+
+    // Pass through user-supplied arguments
+    if let Some(cla_args) = &args.cla_args {
+        for arg in cla_args.split_whitespace() {
+            cmd.arg(arg);
+        }
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to start CLA process '{}': {e}", args.cla))?;
+
+    // Wait for the CLA to fully register (including add_peer creating forward
+    // entries). The CLA subprocess connects via gRPC and the registration
+    // completes asynchronously — we need the forward entries to exist before
+    // we start sending pings.
+    // TODO: Replace with proper RoutingAgent notification API when available
+    {
+        let timeout = tokio::time::sleep(std::time::Duration::from_secs(10));
+        tokio::pin!(timeout);
+        tokio::select! {
+            _ = &mut timeout => {
+                let _ = child.kill().await;
+                return Err(anyhow::anyhow!("CLA didn't start within 10 seconds"));
+            }
+            status = child.wait() => {
+                return Err(anyhow::anyhow!(
+                    "CLA process exited unexpectedly: {}",
+                    status?
+                ));
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                if !args.quiet {
+                    eprintln!("External CLA started");
+                }
+            }
+        }
+    }
+
+    // Add a route for the destination via the peer node
+    // (the CLA's add_peer creates a forward entry, but the BPA also needs
+    // a route to resolve the destination EID to the peer node)
+    if args.destination.service().is_some() {
+        let peer: NodeId = args.destination.clone().try_to_node_id().map_err(|_| {
+            anyhow::anyhow!(
+                "Invalid destination EID {} for ping service",
+                args.destination
+            )
+        })?;
+
+        bpa.register_routing_agent(
+            "ping-target".to_string(),
+            std::sync::Arc::new(hardy_bpa::routes::StaticRoutingAgent::new(&[(
+                args.destination.clone().into(),
+                hardy_bpa::routes::Action::Via(peer.into()),
+                1,
+            )])),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to add route: {e}"))?;
+    }
+
+    let result = run_ping(args, bpa).await;
+
+    // Clean up: stop gRPC server and kill CLA subprocess
+    tasks.shutdown().await;
+    let _ = child.kill().await;
+
+    result
+}
+
+async fn run_ping(
+    args: &Command,
+    bpa: &std::sync::Arc<hardy_bpa::bpa::Bpa>,
+) -> anyhow::Result<ExitCode> {
+    let tasks = hardy_async::TaskPool::new();
+    hardy_async::signal::listen_for_cancel(&tasks);
+
+    let stats = exec_inner(args, bpa.as_ref(), tasks.cancel_token()).await?;
+
+    tasks.shutdown().await;
 
     bpa.shutdown().await;
 
-    // Determine exit code based on statistics (matching Linux ping)
     if stats.received > 0 {
         Ok(ExitCode::Success)
     } else {

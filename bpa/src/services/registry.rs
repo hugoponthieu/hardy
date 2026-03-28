@@ -177,7 +177,7 @@ impl Drop for Sink {
 }
 
 pub(crate) struct Registry {
-    node_ids: node_ids::NodeIds,
+    node_ids: Arc<node_ids::NodeIds>,
     rib: Arc<rib::Rib>,
     // sync::spin::Mutex for O(1) service HashMap operations
     services: hardy_async::sync::spin::Mutex<HashMap<Eid, Arc<Service>>>,
@@ -185,7 +185,7 @@ pub(crate) struct Registry {
 }
 
 impl Registry {
-    pub fn new(node_ids: node_ids::NodeIds, rib: Arc<rib::Rib>) -> Self {
+    pub fn new(node_ids: Arc<node_ids::NodeIds>, rib: Arc<rib::Rib>) -> Self {
         Self {
             node_ids,
             rib,
@@ -212,7 +212,7 @@ impl Registry {
     }
 
     /// Register an Application (high-level, payload-only access)
-    #[cfg_attr(feature = "tracing", instrument(skip(self, app, dispatcher)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self, app, dispatcher)))]
     pub async fn register_application(
         self: &Arc<Self>,
         service_id: Option<hardy_bpv7::eid::Service>,
@@ -224,7 +224,7 @@ impl Registry {
     }
 
     /// Register a low-level Service directly
-    #[cfg_attr(feature = "tracing", instrument(skip(self, service, dispatcher)))]
+    #[cfg_attr(feature = "instrument", instrument(skip(self, service, dispatcher)))]
     pub async fn register_service(
         self: &Arc<Self>,
         service_id: Option<hardy_bpv7::eid::Service>,

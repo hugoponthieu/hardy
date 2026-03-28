@@ -122,7 +122,7 @@ pub trait MetadataStorage: Send + Sync {
     async fn confirm_exists(
         &self,
         bundle_id: &hardy_bpv7::bundle::Id,
-    ) -> Result<Option<metadata::BundleMetadata>>;
+    ) -> Result<Option<bundle::BundleMetadata>>;
 
     /// Final step of the startup recovery protocol. Removes all metadata
     /// entries that were not confirmed via `confirm_exists()` since the last
@@ -204,7 +204,7 @@ pub trait MetadataStorage: Send + Sync {
     async fn poll_adu_fragments(
         &self,
         tx: Sender<bundle::Bundle>,
-        status: &metadata::BundleStatus,
+        status: &bundle::BundleStatus,
     ) -> Result<()>;
 
     /// Returns the next `limit` bundles waiting in a particular status, ordered by received time.
@@ -222,7 +222,7 @@ pub trait MetadataStorage: Send + Sync {
     async fn poll_pending(
         &self,
         tx: storage::Sender<bundle::Bundle>,
-        status: &metadata::BundleStatus,
+        status: &bundle::BundleStatus,
         limit: usize,
     ) -> storage::Result<()>;
 }
@@ -285,19 +285,34 @@ pub trait BundleStorage: Send + Sync {
     async fn delete(&self, storage_name: &str) -> Result<()>;
 }
 
+/// Default LRU cache capacity (number of entries).
+pub const DEFAULT_LRU_CAPACITY: core::num::NonZeroUsize =
+    core::num::NonZeroUsize::new(1024).unwrap();
+
+/// Default maximum bundle size (in bytes) eligible for caching.
+pub const DEFAULT_MAX_CACHED_BUNDLE_SIZE: core::num::NonZeroUsize =
+    core::num::NonZeroUsize::new(16 * 1024).unwrap();
+
+/// Bundles the LRU and its size threshold together so that
+/// [`Store`] only needs a single `Option` field.
+struct BundleCache {
+    // Using sync::spin::Mutex - see comment at top of file
+    lru: hardy_async::sync::spin::Mutex<LruCache<Arc<str>, Bytes>>,
+    max_bundle_size: usize,
+}
+
 // Storage helper
 pub(crate) struct Store {
     tasks: hardy_async::TaskPool,
     metadata_storage: Arc<dyn storage::MetadataStorage>,
     bundle_storage: Arc<dyn storage::BundleStorage>,
 
-    // Using sync::spin::Mutex for bundle_cache - see comment at top of file
-    bundle_cache: hardy_async::sync::spin::Mutex<LruCache<Arc<str>, Bytes>>,
+    // None when the bundle storage backend is already in-memory (avoids double-caching).
+    bundle_cache: Option<BundleCache>,
 
     reaper_cache: Arc<Mutex<BTreeSet<reaper::CacheEntry>>>,
     reaper_wakeup: Arc<hardy_async::Notify>,
 
     // Config
-    max_cached_bundle_size: usize,
     reaper_cache_size: usize,
 }

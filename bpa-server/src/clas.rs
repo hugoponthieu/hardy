@@ -28,9 +28,17 @@ pub enum ClaConfig {
     #[serde(rename = "cspcl")]
     Cspcl(cspcl::config::Config),
 
-    // Catch unknown values
-    #[serde(other)]
-    Unknown,
+    /// Any unrecognised `type` value. When `dynamic-plugins` is enabled,
+    /// this is treated as a path to a plugin shared library and the
+    /// remaining fields are captured as JSON for the plugin factory.
+    /// Otherwise it's ignored with a warning.
+    #[serde(untagged)]
+    Other {
+        #[serde(rename = "type")]
+        plugin_path: String,
+        #[serde(flatten)]
+        config: serde_json::Value,
+    },
 }
 
 #[allow(unused_variables)]
@@ -43,9 +51,6 @@ pub async fn init(config: &[Cla], bpa: &dyn BpaRegistration) -> anyhow::Result<(
         };
 
         match &cla_config.config {
-            ClaConfig::Unknown => {
-                warn!("Ignoring unknown CLA type for CLA: {}", cla_config.name);
-            }
             #[cfg(feature = "tcpclv4")]
             ClaConfig::TcpClv4(config) => {
                 let cla = Arc::new(hardy_tcpclv4::Cla::new(config).map_err(|e| {
@@ -57,8 +62,6 @@ pub async fn init(config: &[Cla], bpa: &dyn BpaRegistration) -> anyhow::Result<(
                     .map_err(|e| {
                         anyhow::anyhow!("Failed to start CLA '{}': {e}", cla_config.name)
                     })?;
-
-                // TODO: Resolver...
             }
             #[cfg(feature = "file-cla")]
             ClaConfig::File(config) => {
@@ -83,6 +86,15 @@ pub async fn init(config: &[Cla], bpa: &dyn BpaRegistration) -> anyhow::Result<(
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to start CLA '{}': {e}", cla_config.name))?;
+            }
+            ClaConfig::Other {
+                plugin_path,
+                config,
+            } => {
+                warn!(
+                    "Ignoring CLA '{}' with unknown type '{}'",
+                    cla_config.name, plugin_path
+                );
             }
         };
     }

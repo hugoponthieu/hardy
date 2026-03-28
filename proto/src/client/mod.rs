@@ -3,6 +3,7 @@ use proxy::*;
 
 mod application;
 mod cla;
+mod routing;
 mod service;
 
 fn from_timestamp(t: prost_types::Timestamp) -> Result<time::OffsetDateTime, tonic::Status> {
@@ -70,5 +71,13 @@ impl hardy_bpa::bpa::BpaRegistration for RemoteBpa {
     ) -> hardy_bpa::services::Result<hardy_bpv7::eid::Eid> {
         application::register_application_service(self.grpc_addr.clone(), service_id, application)
             .await
+    }
+
+    async fn register_routing_agent(
+        &self,
+        name: String,
+        agent: Arc<dyn hardy_bpa::routes::RoutingAgent>,
+    ) -> hardy_bpa::routes::Result<Vec<hardy_bpv7::eid::NodeId>> {
+        routing::register_routing_agent(self.grpc_addr.clone(), name, agent).await
     }
 }

@@ -19,7 +19,7 @@ use std::time::Duration;
 use trace_err::*;
 use tracing::{debug, error, info, warn};
 
-#[cfg(feature = "tracing")]
+#[cfg(feature = "instrument")]
 use tracing::instrument;
 
 #[derive(thiserror::Error, Debug)]

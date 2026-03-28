@@ -30,7 +30,7 @@ pub enum Error {
     NotExact,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(into = "String"))]
 #[cfg_attr(feature = "serde", serde(try_from = "Cow<'_,str>"))]
@@ -39,12 +39,47 @@ pub enum EidPattern {
     Set(Box<[EidPatternItem]>),
 }
 
+impl PartialOrd for EidPattern {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for EidPattern {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        // Higher specificity score = Less (most specific patterns first in BTreeMap)
+        let self_score = self.specificity_score().unwrap_or(0);
+        let other_score = other.specificity_score().unwrap_or(0);
+        other_score.cmp(&self_score).then_with(|| {
+            // Structural tiebreaker for equal scores
+            match (self, other) {
+                (EidPattern::Any, EidPattern::Any) => core::cmp::Ordering::Equal,
+                (EidPattern::Any, EidPattern::Set(_)) => core::cmp::Ordering::Less,
+                (EidPattern::Set(_), EidPattern::Any) => core::cmp::Ordering::Greater,
+                (EidPattern::Set(a), EidPattern::Set(b)) => a.cmp(b),
+            }
+        })
+    }
+}
+
 impl EidPattern {
     #[inline]
     pub fn matches(&self, eid: &Eid) -> bool {
         match self {
             EidPattern::Any => true,
             EidPattern::Set(items) => items.iter().any(|i| i.matches(eid)),
+        }
+    }
+
+    /// Harmonized Specificity Score.
+    ///
+    /// Returns `None` for union sets (multiple items) or patterns violating
+    /// monotonic constraints.
+    pub fn specificity_score(&self) -> Option<u32> {
+        match self {
+            EidPattern::Any => Some(0),
+            EidPattern::Set(items) if items.len() == 1 => items[0].specificity_score(),
+            EidPattern::Set(_) => None, // Union sets not valid for scoring
         }
     }
 
@@ -283,6 +318,19 @@ impl EidPatternItem {
             #[cfg(feature = "dtn-pat-item")]
             EidPatternItem::DtnPatternItem(i) => i.try_to_eid(),
             _ => None,
+        }
+    }
+
+    /// Harmonized Specificity Score.
+    ///
+    /// Returns `None` if the pattern violates monotonic constraints.
+    pub fn specificity_score(&self) -> Option<u32> {
+        match self {
+            EidPatternItem::IpnPatternItem(i) => i.specificity_score(),
+            #[cfg(feature = "dtn-pat-item")]
+            EidPatternItem::DtnPatternItem(i) => i.specificity_score(),
+            // Scheme-level wildcards score 0 (equivalent to ipn:** / dtn:**)
+            EidPatternItem::AnyNumericScheme(_) | EidPatternItem::AnyTextScheme(_) => Some(0),
         }
     }
 }

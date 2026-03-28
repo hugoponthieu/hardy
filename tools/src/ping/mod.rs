@@ -3,7 +3,6 @@ use hardy_bpv7::eid::{Eid, NodeId};
 use rand::RngExt;
 use trace_err::*;
 
-mod cancel;
 mod exec;
 mod payload;
 mod service;
@@ -45,8 +44,9 @@ impl From<Verbosity> for tracing::Level {
 
 /// Send ping bundles to a destination endpoint and measure round-trip times.
 ///
-/// Embeds a minimal BPA and establishes a direct TCPCLv4 connection. Bundles are
-/// signed by default to detect corruption. Press Ctrl+C to stop and show statistics.
+/// Embeds a minimal BPA and establishes a CLA connection (TCPCLv4 by default,
+/// or a plugin CLA via --cla). Bundles are signed by default to detect
+/// corruption. Press Ctrl+C to stop and show statistics.
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
 pub struct Command {
@@ -105,14 +105,26 @@ pub struct Command {
     /// Destination EID to ping
     destination: Eid,
 
-    /// TCPCLv4 peer address (host:port)
+    /// Peer address (host:port) for built-in CLAs
     peer: Option<String>,
 
-    /// Accept self-signed TLS certificates
+    /// CLA to use: built-in name (tcpclv4) or path to an external CLA binary
+    #[arg(long, default_value = "tcpclv4")]
+    cla: String,
+
+    /// Arguments to pass to the external CLA binary (use with --cla /path/to/binary)
+    #[arg(long = "cla-args", allow_hyphen_values = true)]
+    cla_args: Option<String>,
+
+    /// gRPC listen address for external CLA registration (use with --cla /path/to/binary)
+    #[arg(long = "grpc-listen", default_value = "[::1]:50051")]
+    grpc_listen: std::net::SocketAddr,
+
+    /// Accept self-signed TLS certificates (TCPCLv4 only)
     #[arg(long = "tls-insecure")]
     tls_insecure: bool,
 
-    /// CA bundle directory for TLS
+    /// CA bundle directory for TLS (TCPCLv4 only)
     #[arg(long = "tls-ca")]
     tls_ca: Option<std::path::PathBuf>,
 }

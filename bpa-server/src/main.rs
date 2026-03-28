@@ -15,28 +15,6 @@ use tracing::{debug, error, info, warn};
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn listen_for_cancel(tasks: &TaskPool) {
-    #[cfg(unix)]
-    let mut term_handler =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .trace_expect("Failed to register signal handlers");
-    #[cfg(not(unix))]
-    let mut term_handler = std::future::pending();
-
-    let cancel_token = tasks.cancel_token().clone();
-    hardy_async::spawn!(tasks, "signal_handler", async move {
-        tokio::select! {
-            _ = term_handler.recv() => {
-                info!("Received terminate signal, stopping...");
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("Received CTRL+C, stopping...");
-            }
-        }
-        cancel_token.cancel();
-    });
-}
-
 type StorageBackends = (
     Option<Arc<dyn hardy_bpa::storage::MetadataStorage>>,
     Option<Arc<dyn hardy_bpa::storage::BundleStorage>>,
@@ -133,9 +111,20 @@ async fn inner_main(config: config::Config, cli: cli::Args) -> anyhow::Result<()
         .status_reports(config.bpa.status_reports)
         .poll_channel_depth(config.bpa.poll_channel_depth)
         .processing_pool_size(config.bpa.processing_pool_size)
-        .lru_capacity(config.storage.lru_capacity)
-        .max_cached_bundle_size(config.storage.max_cached_bundle_size)
         .node_ids(config.bpa.node_ids);
+
+    // Disable the bundle LRU cache for in-memory storage backends;
+    // they already keep data in memory, so caching would double-store.
+    if matches!(
+        &config.storage.bundle,
+        None | Some(config::BundleStorage::Memory(_))
+    ) {
+        builder = builder.no_cache();
+    } else {
+        builder = builder
+            .lru_capacity(config.storage.lru_capacity)
+            .max_cached_bundle_size(config.storage.max_cached_bundle_size);
+    }
 
     if let Some(metadata_storage) = metadata_storage {
         builder = builder.metadata_storage(metadata_storage);
@@ -149,6 +138,11 @@ async fn inner_main(config: config::Config, cli: cli::Args) -> anyhow::Result<()
 
     // Prepare for graceful shutdown
     let tasks = TaskPool::new();
+
+    // Load static routes
+    if let Some(config) = &config.static_routes {
+        static_routes::init(config, bpa.as_ref(), &tasks).await?;
+    }
 
     // Register filters
     filters::register(
@@ -167,14 +161,15 @@ async fn inner_main(config: config::Config, cli: cli::Args) -> anyhow::Result<()
     // Load static routes after CLA peers are registered so Via(next-hop)
     // routes can resolve through direct neighbour entries during startup.
     if let Some(config) = &config.static_routes {
-        static_routes::init(config, &bpa, &tasks).await?;
+        static_routes::init(config, bpa.as_ref(), &tasks).await?;
     }
 
     if let Some(config) = &config.grpc {
-        grpc::init(config, &bpa, &tasks);
+        let bpa_reg: Arc<dyn hardy_bpa::bpa::BpaRegistration> = bpa.clone();
+        grpc::init(config, &bpa_reg, &tasks);
     }
 
-    listen_for_cancel(&tasks);
+    hardy_async::signal::listen_for_cancel(&tasks);
 
     info!("Started successfully");
 

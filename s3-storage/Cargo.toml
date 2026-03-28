@@ -5,15 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 
 [features]
-tracing = []
+instrument = ["tracing/attributes"]
 serde = ["dep:serde"]
 
 [dependencies]
 hardy-bpa = { path = "../bpa" }
 aws-config = "1"
-aws-sdk-s3 = "1"
+aws-sdk-s3 = { version = "1", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"] }
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "2"
 time = { version = "0.3", features = ["std"] }
-tracing = "0.1"
+tracing = { version = "0.1", default-features = false }
 uuid = { version = "1", features = ["v4"] }
