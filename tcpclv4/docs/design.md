@@ -115,13 +115,15 @@ Peers may refuse transfers (XFER_REFUSE) for reasons including: already received
 | Option | Default | Description |
 |--------|---------|-------------|
 | `address` | `[::]:4556` | Listen address (RFC 9174 Section 8.1 assigns port 4556) |
+| `peers` | `[]` | Static remote peers to connect to proactively |
 | `segment_mru` | 16384 | Maximum segment payload size to receive |
 | `transfer_mru` | 1GB | Maximum total bundle size to receive (assembled in memory) |
 | `max_idle_connections` | 6 | Maximum idle connections per peer address |
 | `connection_rate_limit` | 64 | Maximum incoming connections per second |
+| `reconnect_delay` | 5 | Seconds between reconnect attempts to static peers |
 | `contact_timeout` | 15 | Seconds to wait for contact header |
 | `keepalive_interval` | 60 | Keepalive interval in seconds (None to disable) |
-| `must_use_tls` | true | Require TLS for all connections |
+| `require_tls` | false | Require TLS for all connections |
 
 RFC 9174 timing recommendations are enforced via warnings:
 - Contact timeout SHOULD NOT exceed 60 seconds (Section 4.3)

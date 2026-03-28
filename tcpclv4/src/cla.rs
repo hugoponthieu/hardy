@@ -2,6 +2,11 @@ use super::*;
 use hardy_bpa::async_trait;
 
 impl Cla {
+    fn start_background_tasks(&self) {
+        self.start_listeners();
+        self.start_static_peers();
+    }
+
     fn start_listeners(&self) {
         if let Some(address) = self.address {
             // Only start listener if TLS is not required, or we have server TLS config
@@ -25,6 +30,47 @@ impl Cla {
             }
         }
     }
+
+    fn start_static_peers(&self) {
+        let ctx = self
+            .connection_context()
+            .trace_expect("start_static_peers called before registration");
+
+        for remote_addr in self.peers.iter().copied() {
+            let ctx = ctx.clone();
+            let tasks = self.tasks.clone();
+            let reconnect_delay = self.reconnect_delay;
+
+            self.tasks.spawn(async move {
+                loop {
+                    if !ctx.registry.has_session(&remote_addr) {
+                        let connector = connect::Connector {
+                            tasks: tasks.clone(),
+                            ctx: ctx.clone(),
+                        };
+
+                        match connector.connect(&remote_addr).await {
+                            Ok(()) => {
+                                info!("Connected to static TCPCL peer at {remote_addr}");
+                            }
+                            Err(transport::Error::Timeout) => {
+                                debug!("Timed out connecting to static TCPCL peer at {remote_addr}");
+                            }
+                            Err(e) => {
+                                debug!("Failed to connect to static TCPCL peer at {remote_addr}: {e}");
+                            }
+                        }
+                    }
+
+                    tokio::select! {
+                        _ = ctx.task_cancel_token.cancelled() => break,
+                        _ = ctx.session_cancel_token.cancelled() => break,
+                        _ = tokio::time::sleep(reconnect_delay) => {}
+                    }
+                }
+            });
+        }
+    }
 }
 
 #[async_trait]
@@ -37,8 +83,8 @@ impl hardy_bpa::cla::Cla for Cla {
             node_ids: node_ids.into(),
         });
 
-        // Start listeners now that we have a sink
-        self.start_listeners();
+        // Start listeners and configured outbound sessions now that we have a sink
+        self.start_background_tasks();
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip(self)))]

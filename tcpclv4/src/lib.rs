@@ -15,6 +15,7 @@ use hardy_async::sync::spin::Once;
 use hardy_bpv7::eid::NodeId;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use trace_err::*;
 use tracing::{debug, error, info, warn};
 
@@ -43,7 +44,9 @@ pub struct Cla {
     // Config values
     session_config: config::SessionConfig,
     address: Option<SocketAddr>,
+    peers: Arc<[SocketAddr]>,
     connection_rate_limit: u32,
+    reconnect_delay: Duration,
     segment_mru: u64,
     transfer_mru: u64,
 
@@ -110,7 +113,9 @@ impl Cla {
             // Config values
             session_config: config.session_defaults.clone(),
             address: config.address,
+            peers: config.peers.clone().into(),
             connection_rate_limit: config.connection_rate_limit,
+            reconnect_delay: Duration::from_secs(config.reconnect_delay.max(1)),
             segment_mru: config.segment_mru,
             transfer_mru: config.transfer_mru,
 

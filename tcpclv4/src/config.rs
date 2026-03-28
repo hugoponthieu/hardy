@@ -65,6 +65,9 @@ pub struct Config {
     // The TCP address:port to listen for TCP connections
     pub address: Option<std::net::SocketAddr>, // default = [::]:4556
 
+    // Static remote TCPCL peers to connect to proactively.
+    pub peers: Vec<std::net::SocketAddr>,
+
     // Largest allowable single-segment data payload size to be received
     pub segment_mru: u64,
 
@@ -76,6 +79,9 @@ pub struct Config {
 
     // Maximum incoming connection rate (connections per second)
     pub connection_rate_limit: u32,
+
+    // Delay between reconnect attempts to static peers, in seconds.
+    pub reconnect_delay: u64,
 
     #[cfg_attr(feature = "serde", serde(flatten))]
     pub session_defaults: SessionConfig,
@@ -91,10 +97,12 @@ impl Default for Config {
                 std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
                 4556,
             )),
+            peers: Vec::new(),
             segment_mru: 16384,
             transfer_mru: 0x4000_0000, // 1GB
             max_idle_connections: 6,
             connection_rate_limit: 64,
+            reconnect_delay: 5,
             session_defaults: Default::default(),
             tls: Default::default(),
         }

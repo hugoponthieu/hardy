@@ -5,9 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-hardy-bpv7 = { path = "../bpv7" }
+hardy-bpv7 = { path = "../bpv7", features = ["serde"] }
 hardy-bpa = { path = "../bpa" }
-cspcl = "0.5.0-rc"
+cspcl = { path = "/home/hugo/code/cspcl/rust-bindings/cspcl" }
 spin = "0.10.0"
 hardy-async = { path = "../async" }
 tracing = "0.1.44"

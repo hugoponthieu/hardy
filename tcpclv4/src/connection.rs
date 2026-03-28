@@ -187,6 +187,13 @@ impl ConnectionRegistry {
         }
     }
 
+    pub fn has_session(&self, remote_addr: &SocketAddr) -> bool {
+        self.pools
+            .lock()
+            .trace_expect("Failed to lock mutex")
+            .contains_key(remote_addr)
+    }
+
     #[cfg_attr(feature = "tracing", instrument(skip(self)))]
     pub async fn shutdown(&self) {
         // Closing tx channels causes session::run tasks to exit

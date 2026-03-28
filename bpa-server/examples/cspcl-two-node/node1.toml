@@ -22,9 +22,9 @@ name = "cspcl1"
 type = "cspcl"
 interface = { Can = "vcan0" }
 local_addr = 1
-local_port = 10
+local_port = 11
 
 [[clas.peers]]
 node_ids = ["ipn:2.0"]
 remote_addr = 2
-remote_port = 10
+remote_port = 11

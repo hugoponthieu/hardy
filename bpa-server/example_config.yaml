@@ -117,6 +117,10 @@ clas:
     # The local IP address and port for the CLA to listen on for incoming connections.
     # address: "[::]:4556"
 
+    # Static peers to connect to proactively. Successful sessions learn the
+    # remote node ID and register it as a BPA neighbour.
+    # peers: ["[::1]:4561"]
+
     # The Maximum Receive Unit (MRU) for a single TCP segment payload, in bytes.
     # This defines the largest single block of data that can be received in one go.
     # segment-mru: 16384
@@ -127,6 +131,9 @@ clas:
 
     # The maximum number of idle incoming connections to keep open per remote IP address.
     # max-idle-connections: 6
+
+    # Delay between reconnect attempts to static peers, in seconds.
+    # reconnect-delay: 5
 
     # --- Default Session Parameters for TCPCLv4 ---
     # These settings apply to all sessions unless overridden by a specific peer configuration.

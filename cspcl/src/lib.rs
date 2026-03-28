@@ -1,7 +1,5 @@
-use cspcl::Cspcl;
 use hardy_bpv7::eid::NodeId;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use crate::config::Config;
 
@@ -12,7 +10,7 @@ pub mod listen;
 struct ClaInner {
     sink: Arc<dyn hardy_bpa::cla::Sink>,
     node_ids: Arc<[NodeId]>,
-    cspcl: Arc<Mutex<Cspcl>>,
+    cspcl_sender: cspcl::BundleSender,
     peers: Arc<[config::PeerConfig]>,
 }
 

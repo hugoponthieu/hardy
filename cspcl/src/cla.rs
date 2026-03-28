@@ -1,41 +1,49 @@
 use std::sync::Arc;
 
-use cspcl::{Cspcl, cspcl_sys};
-use futures::stream::StreamExt;
+use cspcl::{BundleStream, Cspcl};
+use futures::StreamExt;
 use hardy_async::TaskPool;
 use hardy_bpa::{
     Bytes, async_trait,
     cla::{ClaAddress, ForwardBundleResult, Sink},
 };
-use tokio::sync::Mutex;
-use tokio::task;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{Cla, ClaInner};
 
 impl ClaInner {
-    fn start_listener(&self, tasks: &Arc<TaskPool>) {
-        let cspcl = Arc::clone(&self.cspcl);
-        let sink = Arc::clone(&self.sink);
+    fn start_listener(&self, tasks: &Arc<TaskPool>, mut stream: BundleStream) {
+        let cancel = tasks.cancel_token().clone();
         let peers = Arc::clone(&self.peers);
+        let sink = Arc::clone(&self.sink);
+
         tasks.spawn(async move {
-            let cspcl = Arc::clone(&cspcl);
-            let mut guard = cspcl.lock().await;
-            let bundle_stream = guard.bundle_stream().await;
-            while let bundle_option = bundle_stream.next().await {
-                let bundle_result = match bundle_option {
-                    Some(full_bundle) => full_bundle,
-                    None => continue,
+            loop {
+                let next_bundle = tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    next_bundle = stream.next() => next_bundle,
                 };
+
+                let Some(bundle_result) = next_bundle else {
+                    warn!("No bundle");
+                    continue;
+                };
+
                 let (payload, src_addr, src_port) = match bundle_result {
                     Ok(bundle) => bundle,
-                    Err(_) => continue,
+                    Err(e) => {
+                        warn!("Bundle receive failed: {e}");
+                        continue;
+                    }
                 };
+
+                debug!("Got bundle for addr {src_addr} and port {src_port}");
                 let peer = peers
                     .iter()
                     .find(|peer| peer.remote_addr == src_addr && peer.remote_port == src_port);
                 let peer_node = peer.and_then(|peer| peer.node_ids.first());
                 let peer_addr = hardy_bpa::cla::ClaAddress::Csp(src_addr, src_port);
+
                 info!(
                     "Received bundle over CSP from {src_addr}:{src_port} ({} bytes) peer_node={:?}",
                     payload.len(),
@@ -61,17 +69,19 @@ impl hardy_bpa::cla::Cla for Cla {
             self.config.local_port,
             self.config.interface.clone(),
         ) {
-            Ok(cspcl) => Arc::new(Mutex::new(cspcl)),
+            Ok(cspcl) => cspcl,
             Err(e) => {
                 error!("Failed to initialize CSPCL instance: {e}");
                 return;
             }
         };
 
+        let (cspcl_sender, bundle_stream) = cspcl.into_bundle_driver().start();
+
         self.inner.call_once(|| ClaInner {
             sink: sink.into(),
             node_ids: node_ids.into(),
-            cspcl,
+            cspcl_sender,
             peers: self.config.peers.clone().into(),
         });
 
@@ -102,11 +112,17 @@ impl hardy_bpa::cla::Cla for Cla {
                 }
             }
 
-            cla_inner.start_listener(&self.tasks);
+            cla_inner.start_listener(&self.tasks, bundle_stream);
         };
     }
 
     async fn on_unregister(&self) {
+        if let Some(inner) = self.inner.get() {
+            if let Err(err) = inner.cspcl_sender.shutdown() {
+                debug!("CSP driver already stopped during unregister: {err}");
+            }
+        }
+
         self.tasks.shutdown().await;
     }
 
@@ -127,16 +143,11 @@ impl hardy_bpa::cla::Cla for Cla {
                 bundle.len()
             );
 
-            let send_result = {
-                let cspcl = Arc::clone(&inner.cspcl);
-                let bundle = bundle.clone();
-                let remote_addr = *remote_addr;
-                let remote_port = *remote_port;
-                let mut cspcl = cspcl.lock().await;
-                cspcl.send_bundle(&bundle, remote_addr, remote_port)
-            };
-
-            match send_result {
+            match inner
+                .cspcl_sender
+                .send_bundle(bundle.to_vec(), *remote_addr, *remote_port)
+                .await
+            {
                 Ok(()) => {
                     debug!("Bundle sent");
                     return Ok(ForwardBundleResult::Sent);
@@ -147,6 +158,7 @@ impl hardy_bpa::cla::Cla for Cla {
                 }
             }
         }
+
         Ok(ForwardBundleResult::NoNeighbour)
     }
 }

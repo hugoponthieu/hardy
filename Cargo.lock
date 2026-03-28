@@ -1260,8 +1260,6 @@ dependencies = [
 [[package]]
 name = "cspcl"
 version = "0.5.0-rc"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30dbc37561ecfba070079293156133a6a691c514300923af70f44fead4fdc2a6"
 dependencies = [
  "cspcl-sys",
  "futures",
@@ -1271,10 +1269,9 @@ dependencies = [
 [[package]]
 name = "cspcl-sys"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79ff1cb8f13bd8e431ccc32369a9b8a64dce0eb4c7aaab0a8c2cc82e162ce492"
 dependencies = [
  "bindgen",
+ "cc",
 ]
 
 [[package]]

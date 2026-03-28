@@ -1,0 +1,22 @@
+log-level = "debug"
+node-ids = "ipn:2.0"
+
+[grpc]
+address = "[::1]:50062"
+services = ["application", "cla", "service"]
+
+[storage.metadata]
+type = "memory"
+
+[storage.bundle]
+type = "memory"
+
+[static-routes]
+routes-file = "./bpa-server/examples/tcpcl-two-node/node2.routes"
+
+[[clas]]
+name = "tcpcl1"
+type = "tcpclv4"
+address = "[::]:4561"
+peers = ["[::1]:4560"]
+reconnect-delay = 2

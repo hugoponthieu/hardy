@@ -15,6 +15,10 @@ path = "src/bp.rs"
 name = "bpa-send"
 path = "src/bpa_send.rs"
 
+[[bin]]
+name = "bpa-recv"
+path = "src/bpa_recv.rs"
+
 [features]
 tracing = ["hardy-bpa/tracing","hardy-tcpclv4/tracing"]
 
