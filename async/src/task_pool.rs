@@ -73,6 +73,7 @@
 ///
 /// For hierarchical cancellation (e.g., cancelling a subtask without affecting
 /// the parent pool), use [`child_token()`](TaskPool::child_token).
+#[derive(Clone)]
 pub struct TaskPool {
     cancel_token: crate::CancellationToken,
     task_tracker: tokio_util::task::TaskTracker,

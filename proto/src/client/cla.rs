@@ -103,20 +103,7 @@ impl hardy_bpa::cla::Sink for Sink {
     }
 
     async fn unregister(&self) {
-        match self
-            .call(cla_to_bpa::Msg::Unregister(UnregisterClaRequest {}))
-            .await
-        {
-            Ok(bpa_to_cla::Msg::Unregister(_)) => {}
-            Ok(msg) => {
-                warn!("Unexpected response: {msg:?}");
-            }
-            Err(e) => {
-                warn!("Failed to request unregistration: {e}");
-            }
-        }
-
-        self.proxy.close().await;
+        self.proxy.shutdown().await;
     }
 }
 
@@ -142,12 +129,6 @@ impl ProxyHandler for Handler {
                         tonic::Status::unavailable("CLA has disconnected").into(),
                     ))
                 }
-            }
-            bpa_to_cla::Msg::Unregister(_) => {
-                if let Some(cla) = self.cla.upgrade() {
-                    cla.on_unregister().await;
-                }
-                Some(cla_to_bpa::Msg::OnUnregister(OnUnregisterClaResponse {}))
             }
             _ => {
                 warn!("Ignoring unsolicited response: {msg:?}");

@@ -166,20 +166,7 @@ impl hardy_bpa::services::ApplicationSink for Sink {
     }
 
     async fn unregister(&self) {
-        match self
-            .call(app_to_bpa::Msg::Unregister(UnregisterRequest {}))
-            .await
-        {
-            Ok(bpa_to_app::Msg::Unregister(_)) => {}
-            Ok(msg) => {
-                warn!("Unexpected response: {msg:?}");
-            }
-            Err(e) => {
-                warn!("Failed to request unregistration: {e}");
-            }
-        }
-
-        self.proxy.close().await;
+        self.proxy.shutdown().await;
     }
 }
 
@@ -218,12 +205,6 @@ impl ProxyHandler for Handler {
                     ))
                 }
             }
-            bpa_to_app::Msg::OnUnregister(_) => {
-                if let Some(service) = self.service.upgrade() {
-                    service.on_unregister().await;
-                }
-                Some(app_to_bpa::Msg::OnUnregister(OnUnregisterResponse {}))
-            }
             _ => {
                 warn!("Ignoring unsolicited response: {msg:?}");
                 None
@@ -259,7 +240,9 @@ pub async fn register_application_service(
     let register_msg = app_to_bpa::Msg::Register(RegisterRequest {
         service_id: service_id.map(|service_id| match service_id {
             eid::Service::Ipn(service_number) => register_request::ServiceId::Ipn(service_number),
-            eid::Service::Dtn(service_name) => register_request::ServiceId::Dtn(service_name.into()),
+            eid::Service::Dtn(service_name) => {
+                register_request::ServiceId::Dtn(service_name.into())
+            }
         }),
     });
     channel_sender
@@ -304,7 +287,10 @@ pub async fn register_application_service(
         },
     };
 
-    info!("Application registration response received: endpoint_id={}", response.endpoint_id);
+    info!(
+        "Application registration response received: endpoint_id={}",
+        response.endpoint_id
+    );
 
     let eid = response
         .endpoint_id
