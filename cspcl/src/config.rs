@@ -1,4 +1,4 @@
-use cspcl::Interface;
+use cspcl_bindings::Interface;
 use hardy_bpv7::eid::NodeId;
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub local_addr: u8,
     pub local_port: u8,
+    pub probe_interval_ms: u64,
+    pub probe_timeout_ms: u64,
+    pub keepalive_interval_ms: u64,
+    pub peer_expiry_ms: u64,
+    pub ack_timeout_ms: u64,
     pub interface: Interface,
     pub peers: Vec<PeerConfig>,
 }
@@ -24,6 +29,11 @@ impl Default for Config {
         Self {
             local_addr: 0,
             local_port: 0,
+            probe_interval_ms: 1_000,
+            probe_timeout_ms: 500,
+            keepalive_interval_ms: 1_000,
+            peer_expiry_ms: 3_000,
+            ack_timeout_ms: 2_000,
             interface: Interface::default(),
             peers: Vec::new(),
         }

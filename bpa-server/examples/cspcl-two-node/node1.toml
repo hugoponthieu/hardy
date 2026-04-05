@@ -14,15 +14,17 @@ type = "memory"
 # [built-in-services]
 # echo = [7]
 
-[static-routes]
-routes-file = "./bpa-server/examples/cspcl-two-node/node1.routes"
-
 [[clas]]
 name = "cspcl1"
 type = "cspcl"
 interface = { Can = "vcan0" }
 local_addr = 1
 local_port = 11
+probe_interval_ms = 500
+probe_timeout_ms = 250
+keepalive_interval_ms = 500
+peer_expiry_ms = 1500
+ack_timeout_ms = 1000
 
 [[clas.peers]]
 node_ids = ["ipn:2.0"]

@@ -114,6 +114,11 @@ interface = { Can = "vcan0" }
 
 local_addr = 2
 local_port = 3
+#probe_interval_ms = 1000
+#probe_timeout_ms = 500
+#keepalive_interval_ms = 1000
+#peer_expiry_ms = 3000
+#ack_timeout_ms = 2000
 
 #[[clas.peers]]
 #node_ids = ["ipn:1.0"]

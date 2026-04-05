@@ -112,6 +112,25 @@ So the remaining issue is not the Hardy RIB or gRPC registration anymore. The re
 - libcsp routing or connection setup
 - SocketCAN integration on `vcan0`
 
+## Updated Behavior
+
+The Hardy `cspcl` CLA now uses one in-band session on the same CSPCL port for:
+
+- session init
+- keepalive traffic
+- bundle delivery acknowledgements
+
+That changes the expected behavior in two important ways:
+
+- if node 2 is down, node 1 does not register the CSP peer with the BPA and outbound bundles remain queued
+- a bundle is only reported as `Sent` after node 2 dispatches it and replies with an in-band acknowledgement
+
+To exercise this end-to-end flow, use:
+
+```bash
+./bpa-server/examples/cspcl-two-node/validate_cspcl_peer_liveness.sh
+```
+
 ## Useful Checks
 
 Check that `vcan0` is up:
