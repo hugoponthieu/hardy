@@ -139,11 +139,6 @@ async fn inner_main(config: config::Config, cli: cli::Args) -> anyhow::Result<()
     // Prepare for graceful shutdown
     let tasks = TaskPool::new();
 
-    // Load static routes
-    if let Some(config) = &config.static_routes {
-        static_routes::init(config, bpa.as_ref()).await?;
-    }
-
     // Register filters
     filters::register(
         &config.rfc9171_validity,
@@ -161,7 +156,7 @@ async fn inner_main(config: config::Config, cli: cli::Args) -> anyhow::Result<()
     // Load static routes after CLA peers are registered so Via(next-hop)
     // routes can resolve through direct neighbour entries during startup.
     if let Some(config) = &config.static_routes {
-        static_routes::init(config, bpa.as_ref(), &tasks).await?;
+        static_routes::init(config, bpa.as_ref()).await?;
     }
 
     if let Some(config) = &config.grpc {

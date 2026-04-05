@@ -108,6 +108,7 @@ impl hardy_bpa::cla::Cla for Cla {
         *self.sink.lock() = Some(Arc::from(sink));
     }
 
+    async fn on_unregister(&self) {
         if self.sink.lock().take().is_none() {
             return;
         }
@@ -199,8 +200,8 @@ impl cla_server::Cla for Service {
         &self,
         request: tonic::Request<tonic::Streaming<ClaToBpa>>,
     ) -> Result<tonic::Response<Self::RegisterStream>, tonic::Status> {
-        let (mut channel_sender, rx) = tokio::sync::mpsc::channel(self.channel_size);
-        let mut channel_receiver = request.into_inner();
+        let (channel_sender, rx) = tokio::sync::mpsc::channel(self.channel_size);
+        let channel_receiver = request.into_inner();
 
         // Spawn the registration handshake and proxy — we must return the
         // response stream immediately so the client can start sending messages.
@@ -208,49 +209,6 @@ impl cla_server::Cla for Service {
         hardy_async::spawn!(self.session_tasks, "cla_session", async move {
             run_cla_session(channel_sender, channel_receiver, bpa).await;
         });
-
-        RpcProxy::recv(&mut channel_sender, &mut channel_receiver, |msg| async {
-            match msg {
-                cla_to_bpa::Msg::Register(request) => {
-                    // Register the CLA and respond
-                    let node_ids = self
-                        .bpa
-                        .register_cla(
-                            request.name,
-                            request.address_type.map(|address_type| {
-                                match address_type.try_into() {
-                                    Ok(ClaAddressType::Tcp) => hardy_bpa::cla::ClaAddressType::Tcp,
-                                    Ok(ClaAddressType::Csp) => hardy_bpa::cla::ClaAddressType::Csp,
-                                    Err(_) | Ok(ClaAddressType::Private) => {
-                                        hardy_bpa::cla::ClaAddressType::Private
-                                    }
-                                }
-                            }),
-                            cla.clone(),
-                            None,
-                        )
-                        .await
-                        .map_err(|e| tonic::Status::from_error(e.into()))?
-                        .into_iter()
-                        .map(|node_id| node_id.to_string())
-                        .collect();
-
-                    Ok(bpa_to_cla::Msg::Register(RegisterClaResponse { node_ids }))
-                }
-                _ => {
-                    warn!("CLA sent incorrect message: {msg:?}");
-                    Err(tonic::Status::internal(format!(
-                        "Unexpected response: {msg:?}"
-                    )))
-                }
-            }
-        })
-        .await?;
-
-        // Start the proxy
-        let handler = Box::new(Handler { cla: cla.clone() });
-        cla.proxy
-            .call_once(|| RpcProxy::run(channel_sender, channel_receiver, handler));
 
         Ok(tonic::Response::new(
             tokio_stream::wrappers::ReceiverStream::new(rx),
@@ -279,6 +237,7 @@ async fn run_cla_session(
                             .address_type
                             .map(|address_type| match address_type.try_into() {
                                 Ok(ClaAddressType::Tcp) => hardy_bpa::cla::ClaAddressType::Tcp,
+                                Ok(ClaAddressType::Csp) => hardy_bpa::cla::ClaAddressType::Csp,
                                 Err(_) | Ok(ClaAddressType::Private) => {
                                     hardy_bpa::cla::ClaAddressType::Private
                                 }
