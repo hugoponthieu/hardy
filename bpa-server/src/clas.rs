@@ -20,6 +20,10 @@ pub enum ClaConfig {
     #[serde(rename = "tcpclv4")]
     TcpClv4(hardy_tcpclv4::config::Config),
 
+    #[cfg(feature = "cspcl")]
+    #[serde(rename = "cspcl")]
+    CspCl(hardy_cspcl::Config),
+
     #[cfg(feature = "file-cla")]
     #[serde(rename = "file-cla")]
     File(hardy_file_cla::Config),
@@ -66,6 +70,18 @@ pub async fn init(config: &[Cla], bpa: &dyn BpaRegistration) -> anyhow::Result<(
                 })?);
 
                 cla.register(bpa, cla_config.name.clone())
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!("Failed to start CLA '{}': {e}", cla_config.name)
+                    })?;
+            }
+            #[cfg(feature = "cspcl")]
+            ClaConfig::CspCl(config) => {
+                let cla = Arc::new(hardy_cspcl::Cla::new(config).map_err(|e| {
+                    anyhow::anyhow!("Failed to create CLA '{}': {e}", cla_config.name)
+                })?);
+
+                cla.register(bpa, cla_config.name.clone(), policy)
                     .await
                     .map_err(|e| {
                         anyhow::anyhow!("Failed to start CLA '{}': {e}", cla_config.name)
