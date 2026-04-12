@@ -17,6 +17,7 @@ localdisk-storage = ["dep:hardy-localdisk-storage"]
 s3-storage = ["dep:hardy-s3-storage"]
 grpc = ["dep:hardy-proto"]
 tcpclv4 = ["dep:hardy-tcpclv4"]
+cspcl = ["dep:hardy-cspcl"]
 file-cla = ["dep:hardy-file-cla"]
 ipn-legacy-filter = ["dep:hardy-ipn-legacy-filter"]
 echo = ["dep:hardy-echo-service"]
@@ -29,11 +30,13 @@ instrument = [
     "hardy-localdisk-storage?/instrument",
     "hardy-s3-storage?/instrument",
     "hardy-tcpclv4?/instrument",
+    "hardy-cspcl?/instrument",
     "hardy-file-cla?/instrument",
     "hardy-echo-service?/instrument",
 ]
 
 [dependencies]
+hardy-cspcl = { path = "../cspcl", features = ["serde"], optional = true }
 hardy-async = { version = "0.1", path = "../async", features = ["watcher"] }
 hardy-bpv7 = { version = "0.5", path = "../bpv7", features = ["serde"] }
 hardy-bpa = { version = "0.1", path = "../bpa", default-features = false, features = ["serde", "rfc9173", "tokio", "no-rfc9171-autoregister"] }

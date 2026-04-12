@@ -749,7 +749,7 @@ version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
 dependencies = [
- "bitflags 2.11.0",
+ "bitflags",
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "cspcl"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cspcl-sys",
  "tokio",
@@ -1279,7 +1279,7 @@ dependencies = [
 
 [[package]]
 name = "cspcl-sys"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bindgen",
  "cc",
