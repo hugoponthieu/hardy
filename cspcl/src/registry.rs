@@ -65,12 +65,17 @@ impl Registry {
         }
     }
 
-    pub fn snapshot(&self, addr: CspAddress) -> Option<PeerSnapshot> {
+    pub fn snapshot_by_addr(&self, addr: u8) -> Option<PeerSnapshot> {
         let guard = self.state.lock();
-        guard.peers.get(&addr).map(|p| PeerSnapshot {
-            node_id: p.node_id.clone(),
-            address: p.address,
-            live: p.live,
+        let mut iter = guard.peers.values().filter(|p| p.address.addr == addr);
+        let first = iter.next()?;
+        if iter.next().is_some() {
+            return None;
+        }
+        Some(PeerSnapshot {
+            node_id: first.node_id.clone(),
+            address: first.address,
+            live: first.live,
         })
     }
 
@@ -185,5 +190,40 @@ mod tests {
         let down = registry.mark_down(addr).expect("peer should go down");
         assert_eq!(down.address, addr);
         assert!(!registry.is_live(addr));
+    }
+
+    #[test]
+    fn snapshot_by_addr_matches_unique_addr() {
+        let registry = Registry::new(&[config::PeerConfig {
+            node_id: "ipn:2.0".parse().unwrap(),
+            addr: 22,
+            port: 10,
+            heartbeat_interval: None,
+        }]);
+
+        let snap = registry
+            .snapshot_by_addr(22)
+            .expect("should match by addr");
+        assert_eq!(snap.address, CspAddress { addr: 22, port: 10 });
+    }
+
+    #[test]
+    fn snapshot_by_addr_rejects_ambiguous_addr() {
+        let registry = Registry::new(&[
+            config::PeerConfig {
+                node_id: "ipn:2.0".parse().unwrap(),
+                addr: 22,
+                port: 10,
+                heartbeat_interval: None,
+            },
+            config::PeerConfig {
+                node_id: "ipn:3.0".parse().unwrap(),
+                addr: 22,
+                port: 11,
+                heartbeat_interval: None,
+            },
+        ]);
+
+        assert!(registry.snapshot_by_addr(22).is_none());
     }
 }

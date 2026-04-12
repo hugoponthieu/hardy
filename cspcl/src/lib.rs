@@ -82,30 +82,37 @@ async fn receive_loop(runtime: Arc<Runtime>) {
             }
         };
 
-        let peer = CspAddress {
+        let inbound_peer = CspAddress {
             addr: incoming.src_addr,
             port: incoming.src_port,
         };
 
-        let Some(peer_state) = runtime.registry.snapshot(peer) else {
-            debug!("dropping frame from unknown peer {:?}", peer);
+        let Some(peer_state) = runtime.registry.snapshot_by_addr(inbound_peer.addr) else {
+            debug!("dropping frame from unknown or ambiguous peer {:?}", inbound_peer);
             continue;
         };
 
-        if let Some(announced) = runtime.registry.mark_live(peer) {
+        if inbound_peer.port != peer_state.address.port {
+            debug!(
+                "resolved inbound peer {:?} to configured {:?}",
+                inbound_peer, peer_state.address
+            );
+        }
+
+        if let Some(announced) = runtime.registry.mark_live(peer_state.address) {
             if let Err(e) = runtime
                 .sink
                 .add_peer(ClaAddress::Csp(announced.address), &[announced.node_id])
                 .await
             {
-                warn!("add_peer failed for {peer:?}: {e}");
+                warn!("add_peer failed for {:?}: {}", announced.address, e);
             }
         }
 
         let frame = match frame::decode(&incoming.data) {
             Ok(frame) => frame,
             Err(e) => {
-                warn!("dropping malformed frame from {peer:?}: {e}");
+                warn!("dropping malformed frame from {:?}: {}", inbound_peer, e);
                 continue;
             }
         };
@@ -118,7 +125,7 @@ async fn receive_loop(runtime: Arc<Runtime>) {
                     .dispatch(bundle.into(), Some(&peer_state.node_id), Some(&peer_addr))
                     .await
                 {
-                    warn!("dispatch failed for {peer:?}: {e}");
+                    warn!("dispatch failed for {:?}: {}", peer_state.address, e);
                 }
             }
             frame::Frame::Heartbeat => {
@@ -128,7 +135,7 @@ async fn receive_loop(runtime: Arc<Runtime>) {
                     .send_bundle(&ack, peer_state.address.addr, peer_state.address.port)
                     .await
                 {
-                    warn!("failed to send heartbeat ack to {peer:?}: {e}");
+                    warn!("failed to send heartbeat ack to {:?}: {}", peer_state.address, e);
                 }
             }
             frame::Frame::HeartbeatAck => {}
