@@ -1303,7 +1303,7 @@ name = "cspcl"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "cspcl 0.5.0-rc",
+ "cspcl 0.4.0",
  "futures",
  "hardy-async",
  "hardy-bpa",
@@ -1317,19 +1317,19 @@ dependencies = [
 
 [[package]]
 name = "cspcl"
-version = "0.5.0-rc"
+version = "0.4.0"
 dependencies = [
  "cspcl-sys",
  "futures",
- "serde",
 ]
 
 [[package]]
 name = "cspcl-sys"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79ff1cb8f13bd8e431ccc32369a9b8a64dce0eb4c7aaab0a8c2cc82e162ce492"
 dependencies = [
  "bindgen",
- "cc",
 ]
 
 [[package]]
