@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {
-    Bundle(Vec<u8>),
+    Bundle { id: u64, payload: Vec<u8> },
+    BundleAck { id: u64 },
     Heartbeat,
     HeartbeatAck,
 }
@@ -9,14 +10,20 @@ const VERSION: u8 = 1;
 const TYPE_BUNDLE: u8 = 1;
 const TYPE_HEARTBEAT: u8 = 2;
 const TYPE_HEARTBEAT_ACK: u8 = 3;
+const TYPE_BUNDLE_ACK: u8 = 4;
 
 pub fn encode(frame: Frame) -> Vec<u8> {
     let mut out = Vec::new();
     out.push(VERSION);
     match frame {
-        Frame::Bundle(payload) => {
+        Frame::Bundle { id, payload } => {
             out.push(TYPE_BUNDLE);
+            out.extend_from_slice(&id.to_be_bytes());
             out.extend_from_slice(&payload);
+        }
+        Frame::BundleAck { id } => {
+            out.push(TYPE_BUNDLE_ACK);
+            out.extend_from_slice(&id.to_be_bytes());
         }
         Frame::Heartbeat => out.push(TYPE_HEARTBEAT),
         Frame::HeartbeatAck => out.push(TYPE_HEARTBEAT_ACK),
@@ -34,7 +41,27 @@ pub fn decode(input: &[u8]) -> Result<Frame, String> {
     }
 
     match input[1] {
-        TYPE_BUNDLE => Ok(Frame::Bundle(input[2..].to_vec())),
+        TYPE_BUNDLE => {
+            if input.len() < 10 {
+                return Err("bundle frame too short".to_string());
+            }
+            let mut id = [0u8; 8];
+            id.copy_from_slice(&input[2..10]);
+            Ok(Frame::Bundle {
+                id: u64::from_be_bytes(id),
+                payload: input[10..].to_vec(),
+            })
+        }
+        TYPE_BUNDLE_ACK => {
+            if input.len() != 10 {
+                return Err("bundle-ack frame must include exactly 8-byte id".to_string());
+            }
+            let mut id = [0u8; 8];
+            id.copy_from_slice(&input[2..10]);
+            Ok(Frame::BundleAck {
+                id: u64::from_be_bytes(id),
+            })
+        }
         TYPE_HEARTBEAT => {
             if input.len() != 2 {
                 return Err("heartbeat frame must not include payload".to_string());
@@ -58,7 +85,11 @@ mod tests {
     #[test]
     fn frame_round_trips() {
         let cases = [
-            Frame::Bundle(vec![1, 2, 3]),
+            Frame::Bundle {
+                id: 42,
+                payload: vec![1, 2, 3],
+            },
+            Frame::BundleAck { id: 1234 },
             Frame::Heartbeat,
             Frame::HeartbeatAck,
         ];
@@ -74,6 +105,8 @@ mod tests {
     fn malformed_frames_are_rejected() {
         assert!(decode(&[]).is_err());
         assert!(decode(&[2, TYPE_HEARTBEAT]).is_err());
+        assert!(decode(&[VERSION, TYPE_BUNDLE]).is_err());
+        assert!(decode(&[VERSION, TYPE_BUNDLE_ACK, 0]).is_err());
         assert!(decode(&[VERSION, TYPE_HEARTBEAT, 0]).is_err());
         assert!(decode(&[VERSION, TYPE_HEARTBEAT_ACK, 0]).is_err());
         assert!(decode(&[VERSION, 0xff]).is_err());
