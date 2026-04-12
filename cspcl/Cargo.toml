@@ -1,10 +1,24 @@
 [package]
-name = "cspcl"
+name = "hardy-cspcl"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[features]
+default = []
+serde = ["dep:serde", "hardy-bpv7/serde"]
+instrument = ["tracing/attributes"]
 
 [dependencies]
 hardy-bpa = { path = "../bpa" }
 hardy-async = { path = "../async" }
 hardy-bpv7 = { path = "../bpv7" }
+tracing = { version = "0.1.44", default-features = false }
+thiserror = "2.0.18"
+tokio = { version = "1.51.1", features = ["time"] }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+cspcl-bindings = { package = "cspcl", path = "../../cspcl/rust-bindings/cspcl", features = ["async-tokio"] }
