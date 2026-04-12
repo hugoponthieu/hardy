@@ -10,7 +10,9 @@ use hardy_bpa::Bytes;
 use hardy_bpa::bpa::BpaRegistration;
 use hardy_bpa::cla::{self, ClaAddress, ClaAddressType, CspAddress, ForwardBundleResult};
 use hardy_bpv7::eid::NodeId;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, warn};
 
 #[derive(thiserror::Error, Debug)]
@@ -25,9 +27,12 @@ struct Runtime {
     sink: Arc<dyn cla::Sink>,
     registry: Arc<registry::Registry>,
     transport: Arc<transport::Transport>,
+    bundle_ack_timeout: std::time::Duration,
     heartbeat_interval: std::time::Duration,
     heartbeat_timeout: std::time::Duration,
     initial_probe_interval: std::time::Duration,
+    next_bundle_id: AtomicU64,
+    pending_acks: hardy_async::sync::spin::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
     tasks: hardy_async::TaskPool,
 }
 
@@ -118,14 +123,34 @@ async fn receive_loop(runtime: Arc<Runtime>) {
         };
 
         match frame {
-            frame::Frame::Bundle(bundle) => {
+            frame::Frame::Bundle { id, payload } => {
                 let peer_addr = ClaAddress::Csp(peer_state.address);
-                if let Err(e) = runtime
+                match runtime
                     .sink
-                    .dispatch(bundle.into(), Some(&peer_state.node_id), Some(&peer_addr))
+                    .dispatch(payload.into(), Some(&peer_state.node_id), Some(&peer_addr))
                     .await
                 {
-                    warn!("dispatch failed for {:?}: {}", peer_state.address, e);
+                    Ok(()) => {
+                        let ack = frame::encode(frame::Frame::BundleAck { id });
+                        if let Err(e) = runtime
+                            .transport
+                            .send_bundle(&ack, peer_state.address.addr, peer_state.address.port)
+                            .await
+                        {
+                            warn!("failed to send bundle ack to {:?}: {}", peer_state.address, e);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("dispatch failed for {:?}: {}", peer_state.address, e);
+                    }
+                }
+            }
+            frame::Frame::BundleAck { id } => {
+                let tx = runtime.pending_acks.lock().remove(&id);
+                if let Some(tx) = tx {
+                    let _ = tx.send(());
+                } else {
+                    debug!("received unexpected bundle ack id {} from {:?}", id, inbound_peer);
                 }
             }
             frame::Frame::Heartbeat => {
@@ -201,9 +226,12 @@ impl cla::Cla for Cla {
             sink,
             registry: Arc::new(registry::Registry::new(&self.config.peers)),
             transport,
+            bundle_ack_timeout: self.config.bundle_ack_timeout(),
             heartbeat_interval: self.config.heartbeat_interval(),
             heartbeat_timeout: self.config.heartbeat_timeout(),
             initial_probe_interval: self.config.initial_probe_interval(),
+            next_bundle_id: AtomicU64::new(1),
+            pending_acks: Default::default(),
             tasks: hardy_async::TaskPool::new(),
         });
 
@@ -251,17 +279,32 @@ impl cla::Cla for Cla {
             return Ok(ForwardBundleResult::NoNeighbour);
         }
 
-        let payload = frame::encode(frame::Frame::Bundle(bundle.to_vec()));
+        let bundle_id = runtime.next_bundle_id.fetch_add(1, Ordering::Relaxed);
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+        runtime.pending_acks.lock().insert(bundle_id, ack_tx);
+
+        let payload = frame::encode(frame::Frame::Bundle {
+            id: bundle_id,
+            payload: bundle.to_vec(),
+        });
         if runtime
             .transport
             .send_bundle(&payload, csp_addr.addr, csp_addr.port)
             .await
             .is_err()
         {
+            runtime.pending_acks.lock().remove(&bundle_id);
             Self::handle_peer_down(runtime.as_ref(), *csp_addr).await;
             return Ok(ForwardBundleResult::NoNeighbour);
         }
 
-        Ok(ForwardBundleResult::Sent)
+        match tokio::time::timeout(runtime.bundle_ack_timeout, ack_rx).await {
+            Ok(Ok(())) => Ok(ForwardBundleResult::Sent),
+            Ok(Err(_)) | Err(_) => {
+                runtime.pending_acks.lock().remove(&bundle_id);
+                Self::handle_peer_down(runtime.as_ref(), *csp_addr).await;
+                Ok(ForwardBundleResult::NoNeighbour)
+            }
+        }
     }
 }
