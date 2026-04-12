@@ -31,7 +31,7 @@ members = [
     "tools",
     "tvr",
     "tests/storage",
-    "postgres-storage",
+    "postgres-storage", "cspcl",
 ]
 
 # Stub patches: Cargo resolves optional deps eagerly (to produce a lock file
