@@ -37,8 +37,18 @@ pub enum Error {
 pub enum ClaAddressType {
     /// IPv4 and IPv6 address + port.
     Tcp,
+    /// CSP address + port.
+    Csp,
     /// A private address type.
     Private,
+}
+
+/// A native CSP transport address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CspAddress {
+    pub addr: u8,
+    pub port: u8,
 }
 
 /// Represents a network address for a specific Convergence Layer Adapter.
@@ -47,6 +57,8 @@ pub enum ClaAddressType {
 pub enum ClaAddress {
     /// An TCP address, represented as a standard socket address.
     Tcp(core::net::SocketAddr),
+    /// A CSP address, represented as address + port.
+    Csp(CspAddress),
     /// An address for an unknown or custom CLA, containing the type identifier and the raw address bytes.
     #[cfg_attr(feature = "serde", serde(with = "private_addr_serde"))]
     Private(Bytes),
@@ -76,6 +88,7 @@ impl ClaAddress {
     pub fn address_type(&self) -> ClaAddressType {
         match self {
             ClaAddress::Tcp(_) => ClaAddressType::Tcp,
+            ClaAddress::Csp(_) => ClaAddressType::Csp,
             ClaAddress::Private(_) => ClaAddressType::Private,
         }
     }
@@ -92,6 +105,25 @@ impl TryFrom<(ClaAddressType, Bytes)> for ClaAddress {
                     .parse()
                     .map_err(|e| Error::Internal(Box::new(e)))?,
             )),
+            ClaAddressType::Csp => {
+                let bytes = addr.as_ref();
+                if bytes.len() != 2 {
+                    return Err(Error::Internal(
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            format!(
+                                "Invalid CSP address length: expected 2, got {}",
+                                bytes.len()
+                            ),
+                        )
+                        .into(),
+                    ));
+                }
+                Ok(ClaAddress::Csp(CspAddress {
+                    addr: bytes[0],
+                    port: bytes[1],
+                }))
+            }
             ClaAddressType::Private => Ok(ClaAddress::Private(addr)),
         }
     }
@@ -104,6 +136,10 @@ impl From<ClaAddress> for (ClaAddressType, Bytes) {
                 ClaAddressType::Tcp,
                 socket_addr.to_string().into_bytes().into(),
             ),
+            ClaAddress::Csp(csp_addr) => (
+                ClaAddressType::Csp,
+                Bytes::from(vec![csp_addr.addr, csp_addr.port]),
+            ),
             ClaAddress::Private(bytes) => (ClaAddressType::Private, bytes),
         }
     }
@@ -113,6 +149,7 @@ impl core::fmt::Display for ClaAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ClaAddress::Tcp(socket_addr) => write!(f, "tcp:{socket_addr}"),
+            ClaAddress::Csp(csp_addr) => write!(f, "csp:{}:{}", csp_addr.addr, csp_addr.port),
             ClaAddress::Private(bytes) => {
                 write!(f, "private:{bytes:02x?}")
             }
@@ -285,11 +322,24 @@ pub trait Sink: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
 
-    // // TODO: Implement test for 'Address Parsing' (Verify ClaAddress conversion logic)
-    // #[test]
-    // fn test_address_parsing() {
-    //     todo!("Verify ClaAddress conversion logic");
-    // }
+    #[test]
+    fn csp_address_round_trip() {
+        let addr = ClaAddress::Csp(CspAddress { addr: 7, port: 10 });
+        let (kind, bytes) = <(ClaAddressType, Bytes)>::from(addr.clone());
+        assert_eq!(kind, ClaAddressType::Csp);
+        assert_eq!(bytes.as_ref(), &[7, 10]);
+
+        let parsed = ClaAddress::try_from((kind, bytes)).expect("csp address should decode");
+        assert_eq!(parsed, addr);
+    }
+
+    #[test]
+    fn csp_address_rejects_invalid_length() {
+        let err = ClaAddress::try_from((ClaAddressType::Csp, Bytes::from_static(&[1])))
+            .expect_err("short csp address must fail");
+        let message = err.to_string();
+        assert!(message.contains("Invalid CSP address length"));
+    }
 }

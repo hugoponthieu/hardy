@@ -19,6 +19,21 @@ pub mod cla {
                     })?;
                     Ok(hardy_bpa::cla::ClaAddress::Tcp(address))
                 }
+                (Ok(ClaAddressType::Csp), address) => {
+                    if address.len() != 2 {
+                        return Err(tonic::Status::invalid_argument(format!(
+                            "Invalid CSP address length: expected 2, got {}",
+                            address.len()
+                        )));
+                    }
+
+                    Ok(hardy_bpa::cla::ClaAddress::Csp(
+                        hardy_bpa::cla::CspAddress {
+                            addr: address[0],
+                            port: address[1],
+                        },
+                    ))
+                }
                 (Ok(ClaAddressType::Private) | Err(_), address) => {
                     Ok(hardy_bpa::cla::ClaAddress::Private(address))
                 }
@@ -32,6 +47,10 @@ pub mod cla {
                 hardy_bpa::cla::ClaAddress::Tcp(address) => ClaAddress {
                     address_type: ClaAddressType::Tcp.into(),
                     address: address.to_string().into(),
+                },
+                hardy_bpa::cla::ClaAddress::Csp(address) => ClaAddress {
+                    address_type: ClaAddressType::Csp.into(),
+                    address: vec![address.addr, address.port].into(),
                 },
                 hardy_bpa::cla::ClaAddress::Private(address) => ClaAddress {
                     address_type: ClaAddressType::Private.into(),

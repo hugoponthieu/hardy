@@ -241,3 +241,54 @@ async fn cla_cli_05_remove_peer() {
     sink.unregister().await;
     server_tasks.shutdown().await;
 }
+
+/// CLA-CLI-06: CSP address round-trip for add/remove/forward paths.
+#[tokio::test]
+async fn cla_cli_06_csp_addresses_round_trip() {
+    let bpa = Arc::new(MockBpa::new());
+    let (grpc_addr, server_tasks) = common::start_server(&bpa, &["cla"]).await;
+
+    let cla = Arc::new(MockCla::new());
+    let remote_bpa = RemoteBpa::new(grpc_addr);
+
+    let _node_ids: Vec<NodeId> = remote_bpa
+        .register_cla(
+            "test-cla-csp".to_string(),
+            Some(cla::ClaAddressType::Csp),
+            cla.clone(),
+            None,
+        )
+        .await
+        .expect("registration should succeed");
+
+    let sink = cla.take_sink().expect("CLA should have a sink");
+
+    let addr = ClaAddress::Csp(cla::CspAddress { addr: 9, port: 10 });
+    let peer_node: NodeId = "ipn:9.0".parse().unwrap();
+    let added = sink
+        .add_peer(addr.clone(), &[peer_node])
+        .await
+        .expect("add_peer should succeed");
+    assert!(added, "peer should be added");
+
+    let removed = sink
+        .remove_peer(&addr)
+        .await
+        .expect("remove_peer should succeed");
+    assert!(removed, "peer should be removed");
+
+    let server_cla = bpa
+        .last_cla
+        .lock()
+        .clone()
+        .expect("BPA should have the server-side CLA");
+    let bundle = hardy_bpa::Bytes::from_static(b"\x9f\x89\x07\x00\x00");
+    let result = server_cla
+        .forward(None, &addr, bundle)
+        .await
+        .expect("forward should succeed");
+    assert!(matches!(result, ForwardBundleResult::Sent));
+
+    sink.unregister().await;
+    server_tasks.shutdown().await;
+}
