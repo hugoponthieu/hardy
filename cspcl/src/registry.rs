@@ -9,12 +9,10 @@ use std::time::{Duration, Instant};
 pub struct PeerSnapshot {
     pub node_id: NodeId,
     pub address: CspAddress,
-    pub live: bool,
 }
 
 #[derive(Clone)]
 pub struct PeerDown {
-    pub node_id: NodeId,
     pub address: CspAddress,
 }
 
@@ -75,7 +73,6 @@ impl Registry {
         Some(PeerSnapshot {
             node_id: first.node_id.clone(),
             address: first.address,
-            live: first.live,
         })
     }
 
@@ -102,7 +99,6 @@ impl Registry {
         Some(PeerSnapshot {
             node_id: peer.node_id.clone(),
             address: peer.address,
-            live: true,
         })
     }
 
@@ -116,7 +112,6 @@ impl Registry {
 
         peer.announced = false;
         Some(PeerDown {
-            node_id: peer.node_id.clone(),
             address: peer.address,
         })
     }
@@ -157,7 +152,6 @@ impl Registry {
                 if peer.announced {
                     peer.announced = false;
                     out.push(PeerDown {
-                        node_id: peer.node_id.clone(),
                         address: peer.address,
                     });
                 }
@@ -201,9 +195,7 @@ mod tests {
             heartbeat_interval: None,
         }]);
 
-        let snap = registry
-            .snapshot_by_addr(22)
-            .expect("should match by addr");
+        let snap = registry.snapshot_by_addr(22).expect("should match by addr");
         assert_eq!(snap.address, CspAddress { addr: 22, port: 10 });
     }
 

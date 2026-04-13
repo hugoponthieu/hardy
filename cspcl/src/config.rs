@@ -1,5 +1,6 @@
 use hardy_bpv7::eid::NodeId;
-use std::time::Duration;
+
+use crate::runtime;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -38,29 +39,8 @@ pub struct Config {
     pub port: u8,
     pub interface: Interface,
     pub interface_name: String,
-    pub bundle_ack_timeout: u64,
-    pub heartbeat_interval: u64,
-    pub heartbeat_timeout: u64,
-    pub initial_probe_interval: u64,
     pub peers: Vec<PeerConfig>,
-}
-
-impl Config {
-    pub fn bundle_ack_timeout(&self) -> Duration {
-        Duration::from_secs(self.bundle_ack_timeout.max(1))
-    }
-
-    pub fn heartbeat_interval(&self) -> Duration {
-        Duration::from_secs(self.heartbeat_interval.max(1))
-    }
-
-    pub fn heartbeat_timeout(&self) -> Duration {
-        Duration::from_secs(self.heartbeat_timeout.max(1))
-    }
-
-    pub fn initial_probe_interval(&self) -> Duration {
-        Duration::from_secs(self.initial_probe_interval.max(1))
-    }
+    pub runtime_config: runtime::Config,
 }
 
 impl Default for Config {
@@ -70,11 +50,8 @@ impl Default for Config {
             port: cspcl_bindings::cspcl_sys::CSPCL_PORT_BP as u8,
             interface: Interface::Loopback,
             interface_name: "loopback".to_string(),
-            bundle_ack_timeout: 3,
-            heartbeat_interval: 5,
-            heartbeat_timeout: 15,
-            initial_probe_interval: 2,
             peers: Vec::new(),
+            runtime_config: runtime::Config::default(),
         }
     }
 }
