@@ -48,9 +48,14 @@ impl Transport {
         })
     }
 
-    pub async fn send_bundle(&self, payload: &[u8], addr: u8, port: u8) -> Result<(), Error> {
+    pub async fn send_bundle(
+        &self,
+        payload: impl Into<Vec<u8>>,
+        addr: u8,
+        port: u8,
+    ) -> Result<(), Error> {
         self.sender
-            .send_bundle(payload, addr, port)
+            .send_bundle(&payload.into(), addr, port)
             .await
             .map_err(Error::Send)
     }

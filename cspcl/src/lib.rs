@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, warn};
 
+use crate::frame::Frame;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("transport initialization failed: {0}")]
@@ -134,10 +136,13 @@ async fn receive_loop(runtime: Arc<Runtime>) {
                     .await
                 {
                     Ok(()) => {
-                        let ack: Vec<u8> = frame::Frame::BundleAck { id }.into();
                         if let Err(e) = runtime
                             .transport
-                            .send_bundle(&ack, peer_state.address.addr, peer_state.address.port)
+                            .send_bundle(
+                                Frame::BundleAck { id },
+                                peer_state.address.addr,
+                                peer_state.address.port,
+                            )
                             .await
                         {
                             warn!(
@@ -163,10 +168,13 @@ async fn receive_loop(runtime: Arc<Runtime>) {
                 }
             }
             frame::Frame::Heartbeat => {
-                let ack: Vec<u8> = frame::Frame::HeartbeatAck.into();
                 if let Err(e) = runtime
                     .transport
-                    .send_bundle(&ack, peer_state.address.addr, peer_state.address.port)
+                    .send_bundle(
+                        Frame::HeartbeatAck,
+                        peer_state.address.addr,
+                        peer_state.address.port,
+                    )
                     .await
                 {
                     warn!(
@@ -188,8 +196,7 @@ async fn heartbeat_loop(runtime: Arc<Runtime>) {
             _ = cancel.cancelled() => break,
             _ = ticker.tick() => {
                 for peer in runtime.registry.heartbeat_targets(runtime.heartbeat_interval) {
-                    let heartbeat:Vec<u8> =frame::Frame::Heartbeat.into();
-                    if let Err(e) = runtime.transport.send_bundle(&heartbeat, peer.addr, peer.port).await {
+                    if let Err(e) = runtime.transport.send_bundle(Frame::Heartbeat, peer.addr, peer.port).await {
                         warn!("heartbeat send failed for {peer:?}: {e}");
                     }
                 }
@@ -212,8 +219,7 @@ async fn initial_probe_loop(runtime: Arc<Runtime>) {
             _ = cancel.cancelled() => break,
             _ = ticker.tick() => {
                 for peer in runtime.registry.probe_targets() {
-                    let heartbeat: Vec<u8> = frame::Frame::Heartbeat.into();
-                    if let Err(e) = runtime.transport.send_bundle(&heartbeat, peer.addr, peer.port).await {
+                    if let Err(e) = runtime.transport.send_bundle(Frame::Heartbeat, peer.addr, peer.port).await {
                         warn!("initial probe failed for {peer:?}: {e}");
                     }
                 }
@@ -295,15 +301,16 @@ impl cla::Cla for Cla {
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         runtime.pending_acks.lock().insert(bundle_id, ack_tx);
 
-        let payload: Vec<u8> = frame::Frame::Bundle {
-            id: bundle_id,
-            payload: bundle.to_vec(),
-        }
-        .into();
-
         if runtime
             .transport
-            .send_bundle(&payload, csp_addr.addr, csp_addr.port)
+            .send_bundle(
+                Frame::Bundle {
+                    id: bundle_id,
+                    payload: bundle.to_vec(),
+                },
+                csp_addr.addr,
+                csp_addr.port,
+            )
             .await
             .is_err()
         {
