@@ -12,23 +12,25 @@ const TYPE_HEARTBEAT: u8 = 2;
 const TYPE_HEARTBEAT_ACK: u8 = 3;
 const TYPE_BUNDLE_ACK: u8 = 4;
 
-pub fn encode(frame: Frame) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.push(VERSION);
-    match frame {
-        Frame::Bundle { id, payload } => {
-            out.push(TYPE_BUNDLE);
-            out.extend_from_slice(&id.to_be_bytes());
-            out.extend_from_slice(&payload);
+impl Into<Vec<u8>> for Frame {
+    fn into(self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(VERSION);
+        match self {
+            Frame::Bundle { id, payload } => {
+                out.push(TYPE_BUNDLE);
+                out.extend_from_slice(&id.to_be_bytes());
+                out.extend_from_slice(&payload);
+            }
+            Frame::BundleAck { id } => {
+                out.push(TYPE_BUNDLE_ACK);
+                out.extend_from_slice(&id.to_be_bytes());
+            }
+            Frame::Heartbeat => out.push(TYPE_HEARTBEAT),
+            Frame::HeartbeatAck => out.push(TYPE_HEARTBEAT_ACK),
         }
-        Frame::BundleAck { id } => {
-            out.push(TYPE_BUNDLE_ACK);
-            out.extend_from_slice(&id.to_be_bytes());
-        }
-        Frame::Heartbeat => out.push(TYPE_HEARTBEAT),
-        Frame::HeartbeatAck => out.push(TYPE_HEARTBEAT_ACK),
+        out
     }
-    out
 }
 
 pub fn decode(input: &[u8]) -> Result<Frame, String> {
