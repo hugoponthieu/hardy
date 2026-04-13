@@ -93,7 +93,10 @@ async fn receive_loop(runtime: Arc<Runtime>) {
         };
 
         let Some(peer_state) = runtime.registry.snapshot_by_addr(inbound_peer.addr) else {
-            debug!("dropping frame from unknown or ambiguous peer {:?}", inbound_peer);
+            debug!(
+                "dropping frame from unknown or ambiguous peer {:?}",
+                inbound_peer
+            );
             continue;
         };
 
@@ -131,13 +134,16 @@ async fn receive_loop(runtime: Arc<Runtime>) {
                     .await
                 {
                     Ok(()) => {
-                        let ack = frame::encode(frame::Frame::BundleAck { id });
+                        let ack: Vec<u8> = frame::Frame::BundleAck { id }.into();
                         if let Err(e) = runtime
                             .transport
                             .send_bundle(&ack, peer_state.address.addr, peer_state.address.port)
                             .await
                         {
-                            warn!("failed to send bundle ack to {:?}: {}", peer_state.address, e);
+                            warn!(
+                                "failed to send bundle ack to {:?}: {}",
+                                peer_state.address, e
+                            );
                         }
                     }
                     Err(e) => {
@@ -150,17 +156,23 @@ async fn receive_loop(runtime: Arc<Runtime>) {
                 if let Some(tx) = tx {
                     let _ = tx.send(());
                 } else {
-                    debug!("received unexpected bundle ack id {} from {:?}", id, inbound_peer);
+                    debug!(
+                        "received unexpected bundle ack id {} from {:?}",
+                        id, inbound_peer
+                    );
                 }
             }
             frame::Frame::Heartbeat => {
-                let ack = frame::encode(frame::Frame::HeartbeatAck);
+                let ack: Vec<u8> = frame::Frame::HeartbeatAck.into();
                 if let Err(e) = runtime
                     .transport
                     .send_bundle(&ack, peer_state.address.addr, peer_state.address.port)
                     .await
                 {
-                    warn!("failed to send heartbeat ack to {:?}: {}", peer_state.address, e);
+                    warn!(
+                        "failed to send heartbeat ack to {:?}: {}",
+                        peer_state.address, e
+                    );
                 }
             }
             frame::Frame::HeartbeatAck => {}
@@ -176,7 +188,7 @@ async fn heartbeat_loop(runtime: Arc<Runtime>) {
             _ = cancel.cancelled() => break,
             _ = ticker.tick() => {
                 for peer in runtime.registry.heartbeat_targets(runtime.heartbeat_interval) {
-                    let heartbeat = frame::encode(frame::Frame::Heartbeat);
+                    let heartbeat:Vec<u8> =frame::Frame::Heartbeat.into();
                     if let Err(e) = runtime.transport.send_bundle(&heartbeat, peer.addr, peer.port).await {
                         warn!("heartbeat send failed for {peer:?}: {e}");
                     }
@@ -200,7 +212,7 @@ async fn initial_probe_loop(runtime: Arc<Runtime>) {
             _ = cancel.cancelled() => break,
             _ = ticker.tick() => {
                 for peer in runtime.registry.probe_targets() {
-                    let heartbeat = frame::encode(frame::Frame::Heartbeat);
+                    let heartbeat: Vec<u8> = frame::Frame::Heartbeat.into();
                     if let Err(e) = runtime.transport.send_bundle(&heartbeat, peer.addr, peer.port).await {
                         warn!("initial probe failed for {peer:?}: {e}");
                     }
@@ -283,10 +295,12 @@ impl cla::Cla for Cla {
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         runtime.pending_acks.lock().insert(bundle_id, ack_tx);
 
-        let payload = frame::encode(frame::Frame::Bundle {
+        let payload: Vec<u8> = frame::Frame::Bundle {
             id: bundle_id,
             payload: bundle.to_vec(),
-        });
+        }
+        .into();
+
         if runtime
             .transport
             .send_bundle(&payload, csp_addr.addr, csp_addr.port)
