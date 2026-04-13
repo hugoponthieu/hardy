@@ -1,10 +1,16 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, atomic::AtomicU64},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
-use hardy_bpa::cla::{ClaAddress, CspAddress, Sink};
+use hardy_bpa::{
+    Bytes,
+    cla::{self, ClaAddress, CspAddress, ForwardBundleResult, Sink},
+};
 use tracing::{debug, warn};
 
 use crate::{
@@ -52,12 +58,12 @@ impl Default for Config {
     }
 }
 
-pub(crate) struct Runtime {
+pub struct Runtime {
     pub sink: Arc<dyn Sink>,
     pub registry: Arc<Registry>,
     pub transport: Arc<Transport>,
     pub config: Config,
-    pub next_bundle_id: AtomicU64,
+    next_bundle_id: AtomicU64,
     pub pending_acks:
         hardy_async::sync::spin::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
     pub tasks: hardy_async::TaskPool,
@@ -80,8 +86,60 @@ impl Runtime {
             tasks: hardy_async::TaskPool::new(),
         }
     }
+
+    pub fn start(self: Arc<Self>) {
+        self.clone().start_receive_loop();
+        self.clone().start_hearbeat_loop();
+        self.clone().start_initial_probe_loop();
+    }
 }
+
 impl Runtime {
+    pub async fn send_bundle(
+        self: Arc<Self>,
+        bundle: Bytes,
+        csp_addr: &CspAddress,
+    ) -> cla::Result<ForwardBundleResult> {
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+        let bundle_id = self.next_bundle_id.fetch_add(1, Ordering::Relaxed);
+        self.pending_acks.lock().insert(bundle_id, ack_tx);
+
+        if self
+            .transport
+            .send_bundle(
+                Frame::Bundle {
+                    id: bundle_id,
+                    payload: bundle.to_vec(),
+                },
+                csp_addr.addr,
+                csp_addr.port,
+            )
+            .await
+            .is_err()
+        {
+            self.pending_acks.lock().remove(&bundle_id);
+            self.handle_peer_down(*csp_addr).await;
+            return Ok(ForwardBundleResult::NoNeighbour);
+        }
+
+        match tokio::time::timeout(self.config.bundle_ack_timeout(), ack_rx).await {
+            Ok(Ok(())) => Ok(ForwardBundleResult::Sent),
+            Ok(Err(_)) | Err(_) => {
+                self.pending_acks.lock().remove(&bundle_id);
+                self.handle_peer_down(*csp_addr).await;
+                Ok(ForwardBundleResult::NoNeighbour)
+            }
+        }
+    }
+
+    async fn handle_peer_down(self: Arc<Runtime>, addr: CspAddress) {
+        if self.registry.mark_down(addr).is_some()
+            && let Err(e) = self.sink.remove_peer(&ClaAddress::Csp(addr)).await
+        {
+            warn!("remove_peer failed for {addr:?}: {e}");
+        }
+    }
+
     pub fn start_hearbeat_loop(self: Arc<Runtime>) {
         hardy_async::spawn!(self.clone().tasks, "cspcl_heartbeat_loop", async move {
             self.heartbeat_loop().await;

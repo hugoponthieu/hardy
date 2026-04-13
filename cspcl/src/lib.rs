@@ -9,13 +9,11 @@ pub use config::{Config, Interface, PeerConfig};
 use hardy_async::async_trait;
 use hardy_bpa::Bytes;
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::cla::{self, ClaAddress, ClaAddressType, CspAddress, ForwardBundleResult};
+use hardy_bpa::cla::{self, ClaAddress, ClaAddressType, ForwardBundleResult};
 use hardy_bpv7::eid::NodeId;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tracing::warn;
 
-use crate::frame::Frame;
 use crate::registry::Registry;
 use crate::runtime::Runtime;
 
@@ -57,12 +55,15 @@ impl Cla {
         }
     }
 
-    async fn handle_peer_down(runtime: &Runtime, addr: CspAddress) {
-        if runtime.registry.mark_down(addr).is_some()
-            && let Err(e) = runtime.sink.remove_peer(&ClaAddress::Csp(addr)).await
-        {
-            warn!("remove_peer failed for {addr:?}: {e}");
-        }
+    pub fn set_runtime(&self, runtime: Arc<Runtime>) {
+        *self.runtime.lock() = Some(runtime);
+    }
+
+    pub fn try_get_runtime(&self) -> cla::Result<Arc<Runtime>> {
+        self.runtime
+            .lock()
+            .clone()
+            .ok_or_else(|| cla::Error::Disconnected)
     }
 }
 
@@ -85,11 +86,9 @@ impl cla::Cla for Cla {
             self.config.runtime_config,
         ));
 
-        runtime.clone().start_receive_loop();
-        runtime.clone().start_hearbeat_loop();
-        runtime.clone().start_initial_probe_loop();
+        runtime.clone().start();
 
-        *self.runtime.lock() = Some(runtime);
+        self.set_runtime(runtime);
     }
 
     async fn on_unregister(&self) {
@@ -108,47 +107,10 @@ impl cla::Cla for Cla {
         cla_addr: &ClaAddress,
         bundle: Bytes,
     ) -> cla::Result<ForwardBundleResult> {
-        let Some(runtime) = self.runtime.lock().clone() else {
-            return Err(cla::Error::Disconnected);
-        };
-
+        let runtime = self.try_get_runtime()?;
         let ClaAddress::Csp(csp_addr) = cla_addr else {
             return Ok(ForwardBundleResult::NoNeighbour);
         };
-
-        if !runtime.registry.is_live(*csp_addr) {
-            return Ok(ForwardBundleResult::NoNeighbour);
-        }
-
-        let bundle_id = runtime.next_bundle_id.fetch_add(1, Ordering::Relaxed);
-        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-        runtime.pending_acks.lock().insert(bundle_id, ack_tx);
-
-        if runtime
-            .transport
-            .send_bundle(
-                Frame::Bundle {
-                    id: bundle_id,
-                    payload: bundle.to_vec(),
-                },
-                csp_addr.addr,
-                csp_addr.port,
-            )
-            .await
-            .is_err()
-        {
-            runtime.pending_acks.lock().remove(&bundle_id);
-            Self::handle_peer_down(runtime.as_ref(), *csp_addr).await;
-            return Ok(ForwardBundleResult::NoNeighbour);
-        }
-
-        match tokio::time::timeout(runtime.config.bundle_ack_timeout(), ack_rx).await {
-            Ok(Ok(())) => Ok(ForwardBundleResult::Sent),
-            Ok(Err(_)) | Err(_) => {
-                runtime.pending_acks.lock().remove(&bundle_id);
-                Self::handle_peer_down(runtime.as_ref(), *csp_addr).await;
-                Ok(ForwardBundleResult::NoNeighbour)
-            }
-        }
+        runtime.send_bundle(bundle, csp_addr).await
     }
 }
