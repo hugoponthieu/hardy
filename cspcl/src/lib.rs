@@ -117,7 +117,7 @@ async fn receive_loop(runtime: Arc<Runtime>) {
             }
         }
 
-        let frame = match frame::decode(&incoming.data) {
+        let frame = match frame::Frame::try_from(&incoming.data) {
             Ok(frame) => frame,
             Err(e) => {
                 warn!("dropping malformed frame from {:?}: {}", inbound_peer, e);
