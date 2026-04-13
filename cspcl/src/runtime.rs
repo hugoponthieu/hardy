@@ -59,14 +59,13 @@ impl Default for Config {
 }
 
 pub struct Runtime {
-    pub sink: Arc<dyn Sink>,
-    pub registry: Arc<Registry>,
-    pub transport: Arc<Transport>,
-    pub config: Config,
+    sink: Arc<dyn Sink>,
+    registry: Arc<Registry>,
+    transport: Arc<Transport>,
+    config: Config,
     next_bundle_id: AtomicU64,
-    pub pending_acks:
-        hardy_async::sync::spin::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
-    pub tasks: hardy_async::TaskPool,
+    pending_acks: hardy_async::sync::spin::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
+    tasks: hardy_async::TaskPool,
 }
 
 impl Runtime {
@@ -129,6 +128,17 @@ impl Runtime {
                 self.handle_peer_down(*csp_addr).await;
                 Ok(ForwardBundleResult::NoNeighbour)
             }
+        }
+    }
+
+    pub async fn unregister_sink(self: Arc<Runtime>) {
+        self.sink.unregister().await;
+    }
+
+    pub async fn shutdown(self: Arc<Runtime>) {
+        self.tasks.shutdown().await;
+        if let Err(e) = self.transport.shutdown().await {
+            warn!("transport shutdown failed: {e}");
         }
     }
 

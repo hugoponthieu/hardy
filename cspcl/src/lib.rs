@@ -51,7 +51,7 @@ impl Cla {
 
     pub async fn unregister(&self) {
         if let Some(runtime) = self.runtime.lock().as_ref() {
-            runtime.sink.unregister().await;
+            runtime.clone().unregister_sink().await;
         }
     }
 
@@ -92,12 +92,8 @@ impl cla::Cla for Cla {
     }
 
     async fn on_unregister(&self) {
-        let runtime = self.runtime.lock().take();
-        if let Some(runtime) = runtime {
-            runtime.tasks.shutdown().await;
-            if let Err(e) = runtime.transport.shutdown().await {
-                warn!("transport shutdown failed: {e}");
-            }
+        if let Some(runtime) = self.runtime.lock().take() {
+            runtime.shutdown().await;
         }
     }
 
