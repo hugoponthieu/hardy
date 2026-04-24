@@ -14,19 +14,17 @@ pub enum Interface {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default, rename_all = "kebab-case"))]
 pub struct PeerConfig {
-    pub node_id: NodeId,
+    pub node_id: Option<NodeId>,
     pub addr: u8,
     pub port: u8,
-    pub heartbeat_interval: Option<u64>,
 }
 
 impl Default for PeerConfig {
     fn default() -> Self {
         Self {
-            node_id: "ipn:1.0".parse().expect("valid default node id"),
+            node_id: None,
             addr: 0,
             port: cspcl_bindings::cspcl_sys::CSPCL_PORT_BP as u8,
-            heartbeat_interval: None,
         }
     }
 }

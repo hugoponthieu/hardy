@@ -1,6 +1,4 @@
 mod config;
-mod frame;
-mod pending_acks;
 mod registry;
 mod runtime;
 mod transport;
@@ -16,7 +14,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::registry::Registry;
-use crate::runtime::Runtime;
+use crate::runtime::{BundleTransport, Runtime};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -72,6 +70,7 @@ impl Cla {
 impl cla::Cla for Cla {
     async fn on_register(&self, sink: Box<dyn cla::Sink>, _node_ids: &[NodeId]) {
         let sink: Arc<dyn cla::Sink> = sink.into();
+        let sink_for_bootstrap = sink.clone();
         let transport = match transport::Transport::new(&self.config) {
             Ok(t) => Arc::new(t),
             Err(e) => {
@@ -83,11 +82,24 @@ impl cla::Cla for Cla {
         let runtime = Arc::new(Runtime::new(
             sink,
             Arc::new(Registry::new(&self.config.peers)),
-            transport,
+            transport as Arc<dyn BundleTransport>,
             self.config.runtime_config,
         ));
 
-        runtime.clone().start();
+        runtime.clone().start_receive_loop();
+        for peer in runtime.bootstrap_peers() {
+            if runtime.mark_peer_announced(peer.address) {
+                if let Err(e) = sink_for_bootstrap
+                    .add_peer(
+                        ClaAddress::Csp(peer.address),
+                        core::slice::from_ref(&peer.node_id),
+                    )
+                    .await
+                {
+                    warn!("add_peer failed for {:?}: {}", peer.address, e);
+                }
+            }
+        }
 
         self.set_runtime(runtime);
     }

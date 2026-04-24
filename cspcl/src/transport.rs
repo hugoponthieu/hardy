@@ -1,8 +1,6 @@
 use crate::config;
 use cspcl_bindings::async_api::{AsyncCspcl, AsyncReceiver, AsyncSender};
-use cspcl_bindings::{
-    Error as CspclError, Interface as CspInterface, InterfaceName, ReceivedBundle,
-};
+use cspcl_bindings::{Error as CspclError, Interface as CspInterface, InterfaceName};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -15,8 +13,15 @@ pub enum Error {
 }
 
 pub enum ReceiveResult {
-    Bundle(ReceivedBundle),
+    Bundle(IncomingBundle),
     Timeout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncomingBundle {
+    pub src_addr: u8,
+    pub src_port: u8,
+    pub data: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -62,7 +67,11 @@ impl Transport {
 
     pub async fn recv_bundle(&self, timeout_ms: u32) -> Result<ReceiveResult, Error> {
         match self.receiver.recv_bundle(timeout_ms).await {
-            Ok(bundle) => Ok(ReceiveResult::Bundle(bundle)),
+            Ok(bundle) => Ok(ReceiveResult::Bundle(IncomingBundle {
+                src_addr: bundle.src_addr,
+                src_port: bundle.src_port,
+                data: bundle.data,
+            })),
             Err(err)
                 if err.code() == cspcl_bindings::cspcl_sys::cspcl_error_t_CSPCL_ERR_TIMEOUT =>
             {
