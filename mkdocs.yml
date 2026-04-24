@@ -78,6 +78,9 @@ nav:
     - BPA Server: configuration/bpa-server.md
     - Storage Backends: configuration/storage.md
     - Convergence Layers: configuration/convergence-layers.md
+  - How-to:
+    - RISC-V CSPCL Release: how-to/riscv-cspcl-release.md
+    - Two-node CSPCL: how-to/cspcl-two-node.md
   - Operations:
     - CLI Tools: operations/tools.md
     - Observability: operations/observability.md

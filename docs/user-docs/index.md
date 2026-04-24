@@ -37,7 +37,12 @@ New to Hardy? Start here:
 
 - [**BPA Server**](configuration/bpa-server.md) -- Node identity, gRPC, services, routing, and filters
 - [**Storage Backends**](configuration/storage.md) -- Metadata and bundle data storage
-- [**Convergence Layers**](configuration/convergence-layers.md) -- TCPCLv4 transport and TLS
+- [**Convergence Layers**](configuration/convergence-layers.md) -- TCPCLv4, CSPCL, file-based transport, and TLS
+
+## Packaging And Release
+
+- [**RISC-V CSPCL Release**](how-to/riscv-cspcl-release.md) -- Build, package, publish, and install a `riscv64` Hardy tarball
+- [**Two-node CSPCL**](how-to/cspcl-two-node.md) -- Validate forwarding after installation
 
 ## Operations
 
