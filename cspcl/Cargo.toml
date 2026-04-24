@@ -21,4 +21,6 @@ tracing = { version = "0.1.44", default-features = false }
 thiserror = "2.0.18"
 tokio = { version = "1.51.1", features = ["time"] }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
-cspcl-bindings = { package = "cspcl", path = "../../cspcl/rust-bindings/cspcl", features = ["async-tokio"] }
+cspcl-bindings = { version = "0.5.0", package = "cspcl", features = [
+  "async-tokio",
+] }

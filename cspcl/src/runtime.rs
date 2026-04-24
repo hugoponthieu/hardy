@@ -1,11 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use hardy_bpa::{
     Bytes,
@@ -15,6 +8,7 @@ use tracing::{debug, warn};
 
 use crate::{
     frame::Frame,
+    pending_acks::{AckError, PendingAcks},
     registry::Registry,
     transport::{self, Transport},
 };
@@ -63,8 +57,7 @@ pub struct Runtime {
     registry: Arc<Registry>,
     transport: Arc<Transport>,
     config: Config,
-    next_bundle_id: AtomicU64,
-    pending_acks: hardy_async::sync::spin::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>,
+    pending_acks: PendingAcks,
     tasks: hardy_async::TaskPool,
 }
 
@@ -80,7 +73,6 @@ impl Runtime {
             registry,
             transport,
             config,
-            next_bundle_id: AtomicU64::new(1),
             pending_acks: Default::default(),
             tasks: hardy_async::TaskPool::new(),
         }
@@ -99,32 +91,22 @@ impl Runtime {
         bundle: Bytes,
         csp_addr: &CspAddress,
     ) -> cla::Result<ForwardBundleResult> {
-        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-        let bundle_id = self.next_bundle_id.fetch_add(1, Ordering::Relaxed);
-        self.pending_acks.lock().insert(bundle_id, ack_tx);
-
+        let (frame, receiver) = self.pending_acks.add(bundle);
         if self
             .transport
-            .send_bundle(
-                Frame::Bundle {
-                    id: bundle_id,
-                    payload: bundle.to_vec(),
-                },
-                csp_addr.addr,
-                csp_addr.port,
-            )
+            .send_bundle(frame.clone(), csp_addr.addr, csp_addr.port)
             .await
             .is_err()
         {
-            self.pending_acks.lock().remove(&bundle_id);
+            self.pending_acks.discard_ack(frame.bundle_id());
             self.handle_peer_down(*csp_addr).await;
             return Ok(ForwardBundleResult::NoNeighbour);
         }
 
-        match tokio::time::timeout(self.config.bundle_ack_timeout(), ack_rx).await {
+        match tokio::time::timeout(self.config.bundle_ack_timeout(), receiver).await {
             Ok(Ok(())) => Ok(ForwardBundleResult::Sent),
             Ok(Err(_)) | Err(_) => {
-                self.pending_acks.lock().remove(&bundle_id);
+                self.pending_acks.discard_ack(frame.bundle_id());
                 self.handle_peer_down(*csp_addr).await;
                 Ok(ForwardBundleResult::NoNeighbour)
             }
@@ -287,14 +269,17 @@ impl Runtime {
                     }
                 }
                 Frame::BundleAck { id } => {
-                    let tx = self.pending_acks.lock().remove(&id);
-                    if let Some(tx) = tx {
-                        let _ = tx.send(());
-                    } else {
-                        debug!(
-                            "received unexpected bundle ack id {} from {:?}",
-                            id, inbound_peer
-                        );
+                    if let Err(e) = self.pending_acks.ack_bundle(id) {
+                        match e {
+                            AckError::SenderNotFound => debug!(
+                                "received unexpected bundle ack id {} from {:?}",
+                                id, inbound_peer
+                            ),
+                            AckError::ReceiverDropped => debug!(
+                                "received bundle ack id {} from {:?}, but waiter was gone",
+                                id, inbound_peer
+                            ),
+                        };
                     }
                 }
                 Frame::Heartbeat => {

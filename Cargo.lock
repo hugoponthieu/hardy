@@ -1272,6 +1272,11 @@ dependencies = [
 [[package]]
 name = "cspcl"
 version = "0.5.0"
+<<<<<<< HEAD
+=======
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54da4a50b04cd8d01a41bb5607316afbf33205f2d2d3ffff59724fc35e1f971f"
+>>>>>>> 08cd25cc (feat(cspcl): dedicated pendings ack logic)
 dependencies = [
  "cspcl-sys",
  "tokio",
@@ -1280,6 +1285,11 @@ dependencies = [
 [[package]]
 name = "cspcl-sys"
 version = "0.4.0"
+<<<<<<< HEAD
+=======
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25b8327bc21493d713040e795de981d13ea35a3047b38677c31d2eba1943168e"
+>>>>>>> 08cd25cc (feat(cspcl): dedicated pendings ack logic)
 dependencies = [
  "bindgen",
  "cc",
