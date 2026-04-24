@@ -1,0 +1,29 @@
+log-level = "debug"
+node-ids = "ipn:1.0"
+
+[grpc]
+address = "[::1]:51051"
+services = ["application", "service", "cla"]
+
+[storage.metadata]
+type = "memory"
+
+[storage.bundle]
+type = "memory"
+
+[static-routes]
+routes-file = "./scripts/cspcl-demo/node-a.routes"
+watch = false
+
+[[clas]]
+name = "csp-a"
+type = "cspcl"
+local-addr = 1
+port = 10
+interface = "can"
+interface-name = "vcan0"
+
+[[clas.peers]]
+node-id = "ipn:2.0"
+addr = 2
+port = 10

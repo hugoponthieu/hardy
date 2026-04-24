@@ -11,7 +11,7 @@ defines one CLA instance.
 | Key | Valid Values | Default | Description |
 |-----|-------------|---------|-------------|
 | `name` | String | *Required* | Unique name for this CLA instance. Used in logging and metrics. |
-| `type` | `tcpclv4`, `file` | *Required* | CLA type to configure. |
+| `type` | `tcpclv4`, `cspcl`, `file-cla` | *Required* | CLA type to configure. |
 
 Multiple CLA instances can be defined (e.g. separate uplink and
 downlink interfaces):
@@ -84,6 +84,67 @@ clas:
 | Key | Valid Values | Default | Description |
 |-----|-------------|---------|-------------|
 | `accept-self-signed` | `true`, `false` | `false` | Accept self-signed certificates from peers. |
+
+## CSPCL
+
+The CubeSat Space Protocol convergence layer (`cspcl`) carries bundles over a
+separate `libcsp` transport stack. It is available only when
+`hardy-bpa-server` is built with the `cspcl` feature enabled.
+
+### Transport Options
+
+| Key | Valid Values | Default | Description |
+|-----|-------------|---------|-------------|
+| `local-addr` | Integer `0-255` | `1` | Local CSP node address used by this CLA instance. |
+| `port` | Integer `0-255` | `10` | CSP port used for bundle traffic. |
+| `interface` | `loopback`, `can` | `loopback` | Underlying CSP transport mode. |
+| `interface-name` | String | `loopback` | Interface identifier such as `loopback`, `vcan0`, or `can0`. |
+
+### Runtime Options
+
+| Key | Valid Values | Default | Description |
+|-----|-------------|---------|-------------|
+| `peer-idle-timeout-secs` | Positive integer (seconds) | unset | Optional local idle policy. It does not emit heartbeat traffic and only affects local BPA visibility. |
+
+### Peer Options
+
+| Key | Valid Values | Default | Description |
+|-----|-------------|---------|-------------|
+| `node-id` | BPv7 node ID | Derived as `ipn:<addr>.0` when omitted | Remote BPA node identifier override used in routing. |
+| `addr` | Integer `0-255` | *Required* | Remote CSP node address. |
+| `port` | Integer `0-255` | `10` | Remote CSP port used for bundle traffic. |
+
+Example:
+
+```yaml
+clas:
+  - name: csp-uplink
+    type: cspcl
+    local-addr: 1
+    port: 10
+    interface: can
+    interface-name: vcan0
+    peers:
+      - node-id: "ipn:2.0"
+        addr: 2
+        port: 10
+```
+
+Configured peers are bootstrap and override entries, not an exclusive allowlist.
+Unknown inbound peers can be discovered dynamically and default to
+`ipn:<addr>.0` when no explicit `node-id` is configured.
+
+Build-time requirements:
+
+- `libcsp` headers available under `CSP_REPO_DIR/include`
+- a built static library at `CSP_BUILD_DIR/libcsp.a`
+- for the documented packaged layout, set `CSP_BUILD_DIR` to `libcsp/lib`
+- exported `CSP_REPO_DIR` and `CSP_BUILD_DIR` before building Hardy
+
+See also:
+
+- [**RISC-V CSPCL Release**](../how-to/riscv-cspcl-release.md) -- Build and publish a tarball
+- [**Two-node CSPCL**](../how-to/cspcl-two-node.md) -- End-to-end forwarding validation
 
 ## File CLA
 
