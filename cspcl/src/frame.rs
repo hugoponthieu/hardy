@@ -51,6 +51,15 @@ impl Into<Vec<u8>> for Frame {
     }
 }
 
+impl Frame {
+    pub fn bundle_id(&self) -> Option<u64> {
+        match self {
+            Frame::Bundle { id, .. } => Some(*id),
+            _ => None,
+        }
+    }
+}
+
 impl TryFrom<&Vec<u8>> for Frame {
     type Error = DecodeError;
 
