@@ -50,6 +50,55 @@ impl Rib {
         )
     }
 
+    #[cfg_attr(feature = "instrument", instrument(skip_all,fields(to = %to)))]
+    pub fn find_local(&self, to: &Eid) -> Option<FindResult> {
+        let inner = self.inner.read();
+
+        // TODO: this should be for *all* tables
+        let table = &inner.routes;
+
+        for entries in table.values() {
+            for (pattern, actions) in entries {
+                if pattern.matches(to) {
+                    for entry in actions {
+                        match &entry.action {
+                            Action::AdminEndpoint => return Some(FindResult::AdminEndpoint),
+                            Action::Local(service) => {
+                                return Some(FindResult::Deliver(service.clone()));
+                            }
+                            Action::Drop(_)
+                            | Action::Forward(_)
+                            | Action::Reflect
+                            | Action::Via(_) => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    #[cfg_attr(feature = "instrument", instrument(skip_all,fields(via = %via)))]
+    pub fn resolve_via(
+        &self,
+        bundle: &hardy_bpv7::bundle::Bundle,
+        metadata: &mut bundle::BundleMetadata,
+        via: &Eid,
+    ) -> Option<FindResult> {
+        let inner = self.inner.read();
+
+        // TODO: this should be for *all* tables
+        let table = &inner.routes;
+
+        map_result(
+            find_recurse(table, via, false, &mut HashSet::new())?,
+            &self.ecmp_hash_state,
+            bundle,
+            metadata,
+        )
+    }
+
     /// Find all peers reachable via a given EID (for queue management, next_hop not needed)
     #[cfg_attr(feature = "instrument", instrument(skip_all,fields(to = %to)))]
     pub(super) fn find_peers(&self, to: &hardy_bpv7::eid::Eid) -> Option<HashSet<u32>> {
@@ -447,6 +496,99 @@ mod tests {
     }
 
     #[test]
+    fn test_find_local_admin_only() {
+        let rib = make_rib();
+        let destination: Eid = "ipn:0.1.0".parse().unwrap();
+
+        let result = rib.find_local(&destination);
+
+        assert!(matches!(result, Some(FindResult::AdminEndpoint)));
+    }
+
+    #[test]
+    fn test_find_local_deliver_only() {
+        let rib = make_rib();
+
+        add_route(
+            &rib,
+            "ipn:0.1.42",
+            "services",
+            Action::Local(Arc::new(services::registry::Service {
+                service: services::registry::ServiceImpl::LowLevel(Arc::new(
+                    crate::services::tests::NullService,
+                )),
+                service_id: hardy_bpv7::eid::Service::Ipn(42),
+            })),
+            1,
+        );
+
+        let destination: Eid = "ipn:0.1.42".parse().unwrap();
+        let result = rib.find_local(&destination);
+
+        assert!(matches!(result, Some(FindResult::Deliver(_))));
+    }
+
+    #[test]
+    fn test_find_local_ignores_via_chain() {
+        let rib = make_rib();
+
+        add_route(
+            &rib,
+            "ipn:0.7.*",
+            "via-admin",
+            Action::Via("ipn:0.1.0".parse().unwrap()),
+            10,
+        );
+
+        let destination: Eid = "ipn:0.7.1".parse().unwrap();
+        let result = rib.find_local(&destination);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_local_ignores_drop() {
+        let rib = make_rib();
+
+        add_route(
+            &rib,
+            "ipn:0.8.*",
+            "policy",
+            Action::Drop(Some(ReasonCode::DestinationEndpointIDUnavailable)),
+            10,
+        );
+
+        let destination: Eid = "ipn:0.8.1".parse().unwrap();
+        let result = rib.find_local(&destination);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_local_ignores_forward() {
+        let rib = make_rib();
+
+        add_local_forward(&rib, ipn_node(8), 88);
+
+        let destination: Eid = "ipn:0.8.1".parse().unwrap();
+        let result = rib.find_local(&destination);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_local_ignores_reflect() {
+        let rib = make_rib();
+
+        add_route(&rib, "ipn:0.8.*", "reflect", Action::Reflect, 10);
+
+        let destination: Eid = "ipn:0.8.1".parse().unwrap();
+        let result = rib.find_local(&destination);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn test_unregistered_local_waits() {
         let rib = make_rib();
 
@@ -555,5 +697,73 @@ mod tests {
             ),
             "Explicit drop rule should override default wait, got {result:?}"
         );
+    }
+
+    #[test]
+    fn test_resolve_via_sets_next_hop_and_returns_peer() {
+        let rib = make_rib();
+        add_local_forward(&rib, ipn_node(2), 42);
+
+        let mut metadata = bundle::BundleMetadata::default();
+        let bundle = hardy_bpv7::bundle::Bundle {
+            id: hardy_bpv7::bundle::Id {
+                source: "ipn:0.99.1".parse().unwrap(),
+                timestamp: hardy_bpv7::creation_timestamp::CreationTimestamp::now(),
+                fragment_info: None,
+            },
+            flags: Default::default(),
+            crc_type: Default::default(),
+            destination: "ipn:0.9.7".parse().unwrap(),
+            report_to: Default::default(),
+            lifetime: core::time::Duration::from_secs(3600),
+            previous_node: None,
+            age: None,
+            hop_count: None,
+            blocks: Default::default(),
+        };
+
+        let next_hop: Eid = "ipn:0.2.0".parse().unwrap();
+        let result = rib.resolve_via(&bundle, &mut metadata, &next_hop);
+
+        assert!(matches!(result, Some(FindResult::Forward(42))));
+        assert_eq!(metadata.read_only.next_hop, Some(next_hop));
+    }
+
+    #[test]
+    fn test_resolve_via_recursive_chain_sets_recursive_next_hop() {
+        let rib = make_rib();
+        add_local_forward(&rib, ipn_node(3), 43);
+        add_route(
+            &rib,
+            "ipn:0.2.*",
+            "via-peer",
+            Action::Via("ipn:0.3.0".parse().unwrap()),
+            10,
+        );
+
+        let mut metadata = bundle::BundleMetadata::default();
+        let bundle = hardy_bpv7::bundle::Bundle {
+            id: hardy_bpv7::bundle::Id {
+                source: "ipn:0.99.1".parse().unwrap(),
+                timestamp: hardy_bpv7::creation_timestamp::CreationTimestamp::now(),
+                fragment_info: None,
+            },
+            flags: Default::default(),
+            crc_type: Default::default(),
+            destination: "ipn:0.9.7".parse().unwrap(),
+            report_to: Default::default(),
+            lifetime: core::time::Duration::from_secs(3600),
+            previous_node: None,
+            age: None,
+            hop_count: None,
+            blocks: Default::default(),
+        };
+
+        let via: Eid = "ipn:0.2.0".parse().unwrap();
+        let result = rib.resolve_via(&bundle, &mut metadata, &via);
+        let recursive_next_hop: Eid = "ipn:0.3.0".parse().unwrap();
+
+        assert!(matches!(result, Some(FindResult::Forward(43))));
+        assert_eq!(metadata.read_only.next_hop, Some(recursive_next_hop));
     }
 }
