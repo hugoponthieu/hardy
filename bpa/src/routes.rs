@@ -90,6 +90,17 @@ pub trait RoutingAgent: Send + Sync {
     async fn on_unregister(&self);
 }
 
+/// Optional per-bundle live-routing provider consulted during dispatch.
+///
+/// This supplements the push-based RIB with a narrow async lookup seam for
+/// dynamic next-hop selection. The returned EID is resolved through the RIB so
+/// BPA-owned local delivery, peer selection, and fallback behavior remain
+/// centralized in the dispatcher.
+#[async_trait]
+pub trait LiveRoutingProvider: Send + Sync {
+    async fn route(&self, bundle: &crate::bundle::Bundle) -> Result<Option<hardy_bpv7::eid::Eid>>;
+}
+
 /// A communication channel from a routing agent back to the BPA's RIB.
 ///
 /// The Sink automatically injects the agent's registered name as the route source,

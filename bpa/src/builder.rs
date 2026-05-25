@@ -11,7 +11,7 @@ use crate::keys::registry::Registry as KeyRegistry;
 use crate::node_ids::NodeIds;
 use crate::policy::EgressPolicy;
 use crate::rib::RibBuilder;
-use crate::routes::RoutingAgent;
+use crate::routes::{LiveRoutingProvider, RoutingAgent};
 use crate::services::registry::ServiceRegistryBuilder;
 use crate::services::{self, Service};
 use crate::storage::{
@@ -42,6 +42,7 @@ pub struct BpaBuilder {
     service_registry_builder: ServiceRegistryBuilder,
     cla_registry_builder: ClaRegistryBuilder,
     rib_builder: RibBuilder,
+    live_routing_provider: Option<Arc<dyn LiveRoutingProvider>>,
 }
 
 impl BpaBuilder {
@@ -140,6 +141,11 @@ impl BpaBuilder {
         self
     }
 
+    pub fn live_routing_provider(mut self, provider: Arc<dyn LiveRoutingProvider>) -> Self {
+        self.live_routing_provider = Some(provider);
+        self
+    }
+
     /// Register a filter immediately.
     pub fn filter(
         self,
@@ -197,6 +203,7 @@ impl BpaBuilder {
             rib.clone(),
             keys_registry,
             filter_engine.clone(),
+            self.live_routing_provider,
         );
 
         let (service_registry, cla_registry) = futures::join!(
@@ -286,6 +293,7 @@ impl Default for BpaBuilder {
             service_registry_builder: ServiceRegistryBuilder::new(),
             cla_registry_builder: ClaRegistryBuilder::new(),
             rib_builder: RibBuilder::new(),
+            live_routing_provider: None,
         }
     }
 }

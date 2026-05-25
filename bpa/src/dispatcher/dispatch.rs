@@ -2,6 +2,34 @@ use super::*;
 use futures::{FutureExt, join, select_biased};
 
 impl Dispatcher {
+    pub(super) async fn lookup_route(
+        &self,
+        bundle: &mut bundle::Bundle,
+    ) -> Option<rib::FindResult> {
+        if let Some(result) = self.rib.find_local(&bundle.bundle.destination) {
+            return Some(result);
+        }
+
+        if let Some(provider) = &self.live_routing_provider {
+            match provider.route(bundle).await {
+                Ok(Some(next_hop)) => {
+                    if let Some(result) =
+                        self.rib
+                            .resolve_via(&bundle.bundle, &mut bundle.metadata, &next_hop)
+                    {
+                        return Some(result);
+                    }
+
+                    warn!("Live routing produced unresolved next hop {next_hop}");
+                }
+                Ok(None) => {}
+                Err(error) => warn!("Live routing lookup failed: {error}"),
+            }
+        }
+
+        self.rib.find(bundle)
+    }
+
     /// Queue a bundle for dispatch processing.
     /// The caller must ensure the bundle status is already `Dispatching`.
     pub(super) async fn dispatch_bundle(&self, bundle: bundle::Bundle) {
@@ -55,7 +83,7 @@ impl Dispatcher {
         cla_registry: &cla::registry::ClaRegistry,
     ) {
         // Perform RIB lookup (sets bundle.metadata.next_hop for Forward results)
-        match self.rib.find(&mut bundle) {
+        match self.lookup_route(&mut bundle).await {
             Some(rib::FindResult::Drop(reason)) => {
                 if let Some(reason) = reason {
                     debug!("Routing lookup indicates bundle should be dropped: {reason:?}");

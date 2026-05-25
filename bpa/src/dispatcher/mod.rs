@@ -11,11 +11,15 @@ mod reassemble;
 mod report;
 mod restart;
 
+#[cfg(test)]
+mod live_route_tests;
+
 pub(crate) struct Dispatcher {
     tasks: hardy_async::TaskPool,
     processing_pool: hardy_async::BoundedTaskPool,
     store: Arc<storage::Store>,
     rib: Arc<rib::Rib>,
+    live_routing_provider: Option<Arc<dyn routes::LiveRoutingProvider>>,
     keys_registry: Arc<keys::registry::Registry>,
     filter_engine: Arc<filter::FilterEngine>,
     cla_registry: hardy_async::sync::spin::Once<Arc<cla::registry::ClaRegistry>>,
@@ -40,6 +44,7 @@ impl Dispatcher {
         rib: Arc<rib::Rib>,
         keys_registry: Arc<keys::registry::Registry>,
         filter_engine: Arc<filter::FilterEngine>,
+        live_routing_provider: Option<Arc<dyn routes::LiveRoutingProvider>>,
     ) -> Arc<Self> {
         let (dispatcher, start) = Self::new_inner(
             status_reports,
@@ -50,6 +55,7 @@ impl Dispatcher {
             rib,
             keys_registry,
             filter_engine,
+            live_routing_provider,
         );
         start(&dispatcher);
         dispatcher
@@ -65,6 +71,7 @@ impl Dispatcher {
         rib: Arc<rib::Rib>,
         keys_registry: Arc<keys::registry::Registry>,
         filter_engine: Arc<filter::FilterEngine>,
+        live_routing_provider: Option<Arc<dyn routes::LiveRoutingProvider>>,
     ) -> (Arc<Self>, impl FnOnce(&Arc<Self>)) {
         if status_reports {
             warn!("Bundle status reports are enabled");
@@ -81,6 +88,7 @@ impl Dispatcher {
             processing_pool: hardy_async::BoundedTaskPool::new(processing_pool_size),
             store,
             rib,
+            live_routing_provider,
             keys_registry,
             filter_engine,
             cla_registry: hardy_async::sync::spin::Once::new(),
