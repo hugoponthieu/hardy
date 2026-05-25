@@ -4,6 +4,7 @@ exclude = [
     "tests/interop/mtcp",
 ]
 members = [
+    "asabr-routing",
     "async",
     "bibe",
     "bpa-server",

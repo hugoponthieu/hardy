@@ -1,0 +1,16 @@
+[package]
+name = "hardy-asabr-routing"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+a_sabr = { path = "../../A-SABR" }
+hardy-bpa = { path = "../bpa", default-features = false, features = ["std", "tokio"] }
+hardy-bpv7 = { path = "../bpv7", features = ["serde"] }
+thiserror = "2"
+tracing = { version = "0.1", default-features = false }
+time = "0.3"
+
