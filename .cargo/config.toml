@@ -1,0 +1,7 @@
+[target.riscv64gc-unknown-linux-gnu]
+linker = "riscv64-linux-gnu-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+runner = "qemu-riscv64"
+
+[env]
+CSP_REPO_DIR = "/home/hugo/code/libcsp"
