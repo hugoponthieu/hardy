@@ -24,6 +24,10 @@ pub enum ClaType {
     #[serde(rename = "tcpclv4")]
     TcpClv4(hardy_tcpclv4::config::Config),
 
+    #[cfg(feature = "cspcl")]
+    #[serde(rename = "cspcl")]
+    Cspcl(hardy_cspcl::Config),
+
     #[cfg(feature = "file-cla")]
     #[serde(rename = "file-cla")]
     File(hardy_file_cla::Config),
@@ -65,6 +69,13 @@ impl Config {
                     self.name
                 );
                 Ok(None)
+            }
+            ClaType::Cspcl(config) => {
+                let cla =
+                    Arc::new(hardy_cspcl::Cla::new(config).map_err(|e| {
+                        anyhow::anyhow!("Failed to create CLA '{}': {e}", self.name)
+                    })?);
+                Ok(Some(cla))
             }
         }
     }

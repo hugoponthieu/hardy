@@ -52,6 +52,19 @@ impl Default for Config {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn peer_timeout_is_distinct_from_heartbeat_interval() {
+        let config = Config::default();
+
+        assert_eq!(config.heartbeat_interval().as_secs(), 5);
+        assert_eq!(config.heartbeat_timeout().as_secs(), 15);
+    }
+}
+
 pub struct Runtime {
     sink: Arc<dyn Sink>,
     registry: Arc<Registry>,
@@ -151,7 +164,7 @@ impl Runtime {
                         }
                     }
 
-                    for timed_out in self.registry.timed_out_peers(self.config.heartbeat_interval()) {
+                    for timed_out in self.registry.timed_out_peers(self.config.heartbeat_timeout()) {
                         if let Err(e) = self.sink.remove_peer(&ClaAddress::Csp(timed_out.address)).await {
                             warn!("remove_peer failed for {:?}: {}", timed_out.address, e);
                         }

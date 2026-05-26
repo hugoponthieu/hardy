@@ -10,7 +10,7 @@ pub use config::{Config, Interface, PeerConfig};
 use hardy_async::async_trait;
 use hardy_bpa::Bytes;
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::cla::{self, ClaAddress, ClaAddressType, ForwardBundleResult};
+use hardy_bpa::cla::{self, ClaAddress, ForwardBundleResult};
 use hardy_bpv7::eid::NodeId;
 use std::sync::Arc;
 use tracing::warn;
@@ -45,8 +45,7 @@ impl Cla {
         name: String,
         policy: Option<Arc<dyn hardy_bpa::policy::EgressPolicy>>,
     ) -> Result<(), Error> {
-        bpa.register_cla(name, Some(ClaAddressType::Csp), self.clone(), policy)
-            .await?;
+        bpa.register_cla(name, self.clone(), policy).await?;
         Ok(())
     }
 
