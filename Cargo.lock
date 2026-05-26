@@ -1977,6 +1977,7 @@ dependencies = [
  "config",
  "directories",
  "getopts",
+ "hardy-asabr-routing",
  "hardy-async",
  "hardy-bpa",
  "hardy-bpv7",

@@ -172,6 +172,17 @@ async fn build(config: config::Config, upgrade_storage: bool) -> anyhow::Result<
         warn!("Ignoring built-in-services.echo: echo feature is disabled at compile time");
     }
 
+    if let Some(asabr_config) = &config.asabr {
+        let provider = hardy_asabr_routing::AsabrRoutingProvider::new(asabr_config.into())
+            .map_err(|e| anyhow::anyhow!("Failed to initialise A-SABR routing: {e}"))?;
+        builder = builder.live_routing_provider(Arc::new(provider));
+        info!(
+            "A-SABR live routing enabled (router={}, contact-plan={})",
+            asabr_config.router,
+            asabr_config.contact_plan_path.display()
+        );
+    }
+
     let mut policies = HashMap::new();
     for (name, policy_config) in config.policies {
         policies.insert(name, policy_config.build()?);

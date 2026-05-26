@@ -12,6 +12,7 @@ use tracing::Level;
 
 use crate::error::Error;
 
+pub mod asabr;
 pub mod cla;
 pub mod policy;
 pub mod static_routes;
@@ -175,6 +176,10 @@ pub struct Config {
     /// Convergence Layer Adaptors (CLAs)
     #[serde(default)]
     pub clas: Vec<cla::Config>,
+
+    /// Optional A-SABR live-routing plugin configuration.
+    #[serde(default)]
+    pub asabr: Option<asabr::Config>,
 }
 
 impl Config {
@@ -496,6 +501,36 @@ another-unknown:
 "#,
         );
         assert_eq!(config.log_level, Level::WARN);
+    }
+
+    // YAML asabr section deserializes into the optional `asabr` field.
+    #[test]
+    #[serial]
+    fn yaml_loads_asabr_config() {
+        let config = write_and_load(
+            "asabr.yaml",
+            r#"
+node-ids: "ipn:1.0"
+asabr:
+  protocol-id: "asabr"
+  router: "SpsnHybridParenting"
+  contact-plan-path: "/tmp/asabr.cp"
+  local-node-id: "ipn:1.0"
+"#,
+        );
+
+        let asabr = config.asabr.expect("missing asabr config");
+        assert_eq!(asabr.protocol_id, "asabr");
+        assert_eq!(asabr.router, "SpsnHybridParenting");
+        assert_eq!(asabr.contact_plan_path, PathBuf::from("/tmp/asabr.cp"));
+    }
+
+    // Absence of the asabr section leaves it unset.
+    #[test]
+    #[serial]
+    fn missing_asabr_section_is_none() {
+        let config = write_and_load("no_asabr.yaml", "node-ids: \"ipn:1.0\"\n");
+        assert!(config.asabr.is_none());
     }
 
     // Node IDs can be a single string.
