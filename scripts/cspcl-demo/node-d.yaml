@@ -1,0 +1,30 @@
+log-level : "debug"
+node-ids: "ipn:4.0"
+
+grpc:
+  address: "[::1]:54051"
+  services: ["application", "service", "cla"]
+
+storage:
+  metadata:
+    type: "memory"
+  bundle:
+    type: "memory"
+
+asabr:
+  protocol-id: "asabr"
+  router: "SpsnHybridParenting"
+  contact-plan-path: "./scripts/cspcl-demo/contact-plan.cp"
+  local-node-id: "ipn:4.0"
+
+clas:
+  - name: "csp-d"
+    type: "cspcl"
+    local-addr: 4
+    port: 10
+    interface: "can"
+    interface-name: "vcan0"
+    peers:
+      - node-id : "ipn:3.0"
+        addr : 3
+        port : 10

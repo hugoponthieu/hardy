@@ -10,3 +10,7 @@ bpa-server/certs/
 # MkDocs
 /site/
 /.venv/
+
+# Local demo run artefacts
+/scripts/cspcl-demo/logs/
+/scripts/cspcl-demo/pids

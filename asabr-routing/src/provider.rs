@@ -88,6 +88,7 @@ fn worker_main(
     if init_tx.send(Ok(local_node_id)).is_err() {
         return;
     }
+    debug!("A-SABR router worker ready (local-node-id={local_node_id})");
 
     while let Some(command) = rx.blocking_recv() {
         match command {
@@ -103,7 +104,7 @@ fn worker_main(
         }
     }
 
-    debug!("hardy-asabr-router worker thread exiting");
+    debug!("A-SABR router worker thread exiting");
 }
 
 fn route_one(
@@ -135,8 +136,14 @@ impl LiveRoutingProvider for AsabrRoutingProvider {
         &self,
         bundle: &hardy_bpa::bundle::Bundle,
     ) -> routes::Result<Option<Eid>> {
+        let destination = &bundle.bundle.destination;
+        debug!("A-SABR routing lookup for {destination}");
+
         let translated = translate::translate_bundle(bundle, self.local_node_id)
-            .map_err(|e| routes::Error::Internal(Box::new(e)))?;
+            .map_err(|e| {
+                debug!("A-SABR translation failed for {destination}: {e}");
+                routes::Error::Internal(Box::new(e))
+            })?;
         let now = translate::now_asabr_time();
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
@@ -149,13 +156,21 @@ impl LiveRoutingProvider for AsabrRoutingProvider {
         let result = response_rx
             .await
             .map_err(|_| routes::Error::Disconnected)?
-            .map_err(|e| routes::Error::Internal(Box::new(e)))?;
-        Ok(result.map(|node| {
+            .map_err(|e| {
+                debug!("A-SABR router error for {destination}: {e}");
+                routes::Error::Internal(Box::new(e))
+            })?;
+        let next_hop = result.map(|node| {
             Eid::from(IpnNodeId {
                 allocator_id: 0,
                 node_number: u32::from(node),
             })
-        }))
+        });
+        match &next_hop {
+            Some(eid) => debug!("A-SABR returned next-hop {eid} for {destination}"),
+            None => debug!("A-SABR found no route for {destination}"),
+        }
+        Ok(next_hop)
     }
 }
 
