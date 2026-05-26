@@ -1878,10 +1878,12 @@ name = "hardy-asabr-routing"
 version = "0.1.0"
 dependencies = [
  "a_sabr",
+ "async-trait",
  "hardy-bpa",
  "hardy-bpv7",
  "thiserror",
  "time",
+ "tokio",
  "tracing",
 ]
 

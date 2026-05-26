@@ -23,4 +23,10 @@ pub enum Error {
         router: String,
         source: a_sabr::errors::ASABRError,
     },
+    #[error("A-SABR route lookup failed: {0}")]
+    Route(a_sabr::errors::ASABRError),
+    #[error("failed to spawn A-SABR worker thread: {0}")]
+    WorkerSpawn(#[source] std::io::Error),
+    #[error("A-SABR worker thread terminated before initialization")]
+    WorkerInitFailed,
 }
