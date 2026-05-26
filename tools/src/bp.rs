@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::app_send::exec;
+
+mod app_send;
 mod ping;
 
 /// Bundle Protocol diagnostic and testing tools.
@@ -14,6 +17,7 @@ struct Cli {
 enum Commands {
     /// Send ping bundles and measure round-trip time
     Ping(ping::Command),
+    AppSend(app_send::Command),
 }
 
 fn main() {
@@ -21,5 +25,6 @@ fn main() {
     // This is the core of the dispatch logic.
     match Cli::parse().command {
         Commands::Ping(args) => args.exec(),
+        Commands::AppSend(command) => exec(command),
     }
 }
