@@ -5,6 +5,7 @@ version = 4
 [[package]]
 name = "a_sabr"
 version = "0.1.0"
+source = "git+https://github.com/DTN-MTP/A-SABR#128dc5490d4bc2635b816bb970b83ade83f20007"
 dependencies = [
  "derivative",
  "serde",
