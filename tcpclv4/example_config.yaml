@@ -15,6 +15,14 @@
 # The maximum incoming connection rate (connections per second).
 #connection-rate-limit: 64
 
+# Statically configured peers. Each entry maps a peer node ID to a fixed
+# TCPCLv4 address, registered with the BPA at startup so bundles can be routed
+# to that node without prior discovery. The TCP connection is opened lazily on
+# the first bundle forwarded to the peer.
+#peers:
+#  - node-id: "ipn:2.0"
+#    address: "192.168.1.10:4556"
+
 # --- Default Session Parameters for TCPCLv4 ---
 # These settings apply to all sessions unless overridden by a specific peer configuration.
 
