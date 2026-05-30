@@ -66,6 +66,23 @@ pub struct TlsDebugConfig {
     pub accept_self_signed: bool,
 }
 
+/// A statically configured TCPCLv4 peer.
+///
+/// Maps a known peer node ID to a fixed TCP address. Configured peers are
+/// registered with the BPA when the CLA registers, so bundles can be routed to
+/// them without prior discovery. The connection itself is established lazily on
+/// the first forward to that peer.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "kebab-case"))]
+pub struct PeerConfig {
+    /// The peer's node ID, e.g. `"ipn:2.0"` or `"dtn://node/"`.
+    pub node_id: hardy_bpv7::eid::NodeId,
+
+    /// The peer's TCPCLv4 listen address, e.g. `"192.168.1.10:4556"`.
+    pub address: std::net::SocketAddr,
+}
+
 /// Top-level configuration for the TCPCLv4 CLA.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -96,6 +113,11 @@ pub struct Config {
 
     /// Optional TLS configuration. When `None`, all connections are unencrypted.
     pub tls: Option<TlsConfig>,
+
+    /// Statically configured peers, registered with the BPA when the CLA
+    /// registers. Empty by default. Connections are established lazily on the
+    /// first forward to each peer.
+    pub peers: Vec<PeerConfig>,
 }
 
 impl Default for Config {
@@ -111,6 +133,41 @@ impl Default for Config {
             connection_rate_limit: 64,
             session_defaults: Default::default(),
             tls: Default::default(),
+            peers: Vec::new(),
         }
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_static_peers() {
+        // kebab-case keys, NodeId from string, SocketAddr from "host:port".
+        let json = r#"{
+            "address": "[::]:4556",
+            "peers": [
+                { "node-id": "ipn:2.0", "address": "192.168.1.10:4556" }
+            ]
+        }"#;
+
+        let cfg: Config = serde_json::from_str(json).expect("config should deserialize");
+
+        assert_eq!(cfg.peers.len(), 1);
+        assert_eq!(
+            cfg.peers[0].node_id,
+            "ipn:2.0".parse().expect("valid node id")
+        );
+        assert_eq!(
+            cfg.peers[0].address,
+            "192.168.1.10:4556".parse().expect("valid socket addr")
+        );
+    }
+
+    #[test]
+    fn peers_defaults_to_empty() {
+        let cfg: Config = serde_json::from_str("{}").expect("empty config should deserialize");
+        assert!(cfg.peers.is_empty());
     }
 }
