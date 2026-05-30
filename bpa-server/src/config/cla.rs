@@ -70,6 +70,7 @@ impl Config {
                 );
                 Ok(None)
             }
+            #[cfg(feature = "cspcl")]
             ClaType::Cspcl(config) => {
                 let cla =
                     Arc::new(hardy_cspcl::Cla::new(config).map_err(|e| {
