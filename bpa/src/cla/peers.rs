@@ -128,8 +128,14 @@ impl Peer {
     }
 
     async fn close(&self) {
-        for tx in self.inner.wait().queues.values() {
-            tx.close().await;
+        // Use get() rather than wait(): a peer that was never start()ed (e.g. an
+        // orphan created in ClaRegistry::add_peer when the address was already
+        // registered) has no queues to close, and wait() would block forever on
+        // the uninitialised OnceLock.
+        if let Some(inner) = self.inner.get() {
+            for tx in inner.queues.values() {
+                tx.close().await;
+            }
         }
     }
 }

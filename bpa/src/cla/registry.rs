@@ -324,11 +324,9 @@ impl ClaRegistry {
             }
         };
 
-        // If entry already existed, clean up the orphaned peer_id
-        // TODO: This deadlocks — PeerTable::remove() calls Peer::close() which calls
-        // self.inner.wait() on an OnceLock that was never initialised (start() was never
-        // called on the orphan). Fix: either check inner.is_initialized() in close(), or
-        // remove directly from the PeerTable HashMap without calling close().
+        // If entry already existed, clean up the orphaned peer_id. The orphan was
+        // never start()ed; Peer::close() handles that case (it no longer waits on
+        // the uninitialised OnceLock), so PeerTable::remove() returns promptly.
         if !inserted {
             self.peers.remove(peer_id).await;
             return false;
@@ -465,6 +463,50 @@ mod tests {
         // Removing again should return false
         let removed = sink.remove_peer(&peer_addr).await.unwrap();
         assert!(!removed, "Double remove_peer should return false");
+
+        bpa.shutdown().await;
+    }
+
+    // Adding the same peer address twice must return false WITHOUT deadlocking.
+    // Regression: the orphaned-peer cleanup path in add_peer called
+    // PeerTable::remove -> Peer::close -> OnceLock::wait() on a peer that was
+    // never start()ed, hanging forever. This is hit whenever a CLA learns a peer
+    // whose address was already registered (e.g. a statically-configured peer
+    // that the CLA later re-discovers when a session is established).
+    //
+    // NOTE: if this regresses, the bug is a blocking park (OnceLock::wait), so it
+    // hangs the test rather than failing an assertion — a stalled run here is the
+    // failure signal.
+    #[tokio::test]
+    async fn test_duplicate_add_peer_does_not_deadlock() {
+        let bpa = Bpa::builder().build().await.unwrap();
+        bpa.start(false);
+
+        let cla = Arc::new(TestCla::new());
+        bpa.register_cla("dup-peer-cla".to_string(), cla.clone(), None)
+            .await
+            .unwrap();
+
+        let sink = cla.sink.get().expect("Sink should be set after register");
+        let peer_addr = ClaAddress::Private("dup-peer".as_bytes().into());
+        let peer_node = hardy_bpv7::eid::NodeId::Ipn(hardy_bpv7::eid::IpnNodeId {
+            allocator_id: 0,
+            node_number: 30,
+        });
+
+        // First add succeeds.
+        let added = sink
+            .add_peer(peer_addr.clone(), std::slice::from_ref(&peer_node))
+            .await
+            .unwrap();
+        assert!(added, "First add_peer should succeed");
+
+        // Second add for the SAME address must return false promptly, not hang.
+        let second = sink
+            .add_peer(peer_addr.clone(), std::slice::from_ref(&peer_node))
+            .await
+            .unwrap();
+        assert!(!second, "Duplicate add_peer should return false");
 
         bpa.shutdown().await;
     }
