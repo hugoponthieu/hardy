@@ -73,6 +73,7 @@ pub struct Cla {
     connection_rate_limit: u32,
     segment_mru: u64,
     transfer_mru: u64,
+    peers: Vec<config::PeerConfig>,
 
     // Computed at construction
     tls_config: Option<Arc<tls::TlsConfig>>,
@@ -143,6 +144,7 @@ impl Cla {
             connection_rate_limit: config.connection_rate_limit,
             segment_mru: config.segment_mru,
             transfer_mru: config.transfer_mru,
+            peers: config.peers.clone(),
 
             // Computed state
             tls_config,
