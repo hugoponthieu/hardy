@@ -93,7 +93,7 @@ impl ConnectionPool {
     }
 
     async fn remove(&self, local_addr: &SocketAddr) -> bool {
-        let remove_addr = {
+        let (empty, owned_peers) = {
             let mut inner = self.inner.lock().trace_expect("Failed to lock mutex");
             inner.active.remove(local_addr);
             let before = inner.idle.len();
@@ -104,18 +104,25 @@ impl ConnectionPool {
             }
 
             let empty = inner.active.is_empty() && inner.idle.is_empty();
-            if empty {
+            // Only withdraw the BPA peer if THIS pool registered it. A peer that
+            // was added out-of-band (e.g. a statically-configured peer) had its
+            // `add_peer` rejected here as already-registered, so `peers` is empty
+            // — its route must survive transient connection loss so the next
+            // forward can re-dial.
+            let owned_peers = if empty {
+                let owned = !inner.peers.is_empty();
                 inner.peers.clear();
-            }
-            empty
+                owned
+            } else {
+                false
+            };
+            (empty, owned_peers)
         };
 
-        if remove_addr {
+        if owned_peers {
             _ = self.sink.remove_peer(&self.remote_addr).await;
-            true
-        } else {
-            false
         }
+        empty
     }
 
     #[cfg_attr(feature = "instrument", instrument(skip(self, bundle)))]
@@ -300,5 +307,115 @@ impl ConnectionRegistry {
             }
         }
         Err(bundle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hardy_bpa::async_trait;
+    use hardy_bpa::cla::{ClaAddress, Sink};
+    use hardy_bpv7::eid::{IpnNodeId, NodeId};
+    use std::sync::Mutex as StdMutex;
+
+    // A Sink that records remove_peer calls and returns a configurable add_peer
+    // result (true = this pool registered the peer; false = already registered,
+    // e.g. a statically-configured peer).
+    struct MockSink {
+        add_peer_result: bool,
+        removed: Arc<StdMutex<Vec<ClaAddress>>>,
+    }
+
+    #[async_trait]
+    impl Sink for MockSink {
+        async fn unregister(&self) {}
+
+        async fn dispatch(
+            &self,
+            _bundle: hardy_bpa::Bytes,
+            _peer_node: Option<&NodeId>,
+            _peer_addr: Option<&ClaAddress>,
+        ) -> hardy_bpa::cla::Result<()> {
+            Ok(())
+        }
+
+        async fn add_peer(
+            &self,
+            _cla_addr: ClaAddress,
+            _node_ids: &[NodeId],
+        ) -> hardy_bpa::cla::Result<bool> {
+            Ok(self.add_peer_result)
+        }
+
+        async fn remove_peer(&self, cla_addr: &ClaAddress) -> hardy_bpa::cla::Result<bool> {
+            self.removed.lock().unwrap().push(cla_addr.clone());
+            Ok(true)
+        }
+    }
+
+    fn make_pool(
+        add_peer_result: bool,
+    ) -> (ConnectionPool, Arc<StdMutex<Vec<ClaAddress>>>, SocketAddr) {
+        let removed = Arc::new(StdMutex::new(Vec::new()));
+        let sink = Arc::new(MockSink {
+            add_peer_result,
+            removed: removed.clone(),
+        });
+        let remote_addr: SocketAddr = "[::1]:24556".parse().unwrap();
+        let local_addr: SocketAddr = "[::1]:50000".parse().unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::channel::<(
+            hardy_bpa::Bytes,
+            tokio::sync::oneshot::Sender<hardy_bpa::cla::ForwardBundleResult>,
+        )>(1);
+        let conn = Connection { tx, local_addr };
+        let pool = ConnectionPool::new(conn, sink, remote_addr, 6);
+        (pool, removed, local_addr)
+    }
+
+    fn ipn(node_number: u32) -> NodeId {
+        NodeId::Ipn(IpnNodeId {
+            allocator_id: 0,
+            node_number,
+        })
+    }
+
+    // A statically-configured peer (sink reports it as already registered) must
+    // NOT be withdrawn when its connection drops — the route has to persist so
+    // the next forward can re-dial. Regression for: restarting the peer node
+    // permanently broke forwarding because the static route was torn down.
+    #[tokio::test]
+    async fn static_peer_survives_connection_drop() {
+        let (pool, removed, local_addr) = make_pool(false);
+
+        // Session learns the peer, but the address is already registered statically.
+        pool.add_peer(ipn(2)).await;
+
+        // The connection drops; pool becomes empty.
+        let empty = pool.remove(&local_addr).await;
+        assert!(
+            empty,
+            "pool should report empty after its only connection drops"
+        );
+        assert!(
+            removed.lock().unwrap().is_empty(),
+            "statically-registered peer must not be withdrawn on connection drop"
+        );
+    }
+
+    // A dynamically-learned peer (this pool registered it) IS withdrawn when its
+    // last connection drops, so stale routes don't linger.
+    #[tokio::test]
+    async fn dynamic_peer_withdrawn_on_connection_drop() {
+        let (pool, removed, local_addr) = make_pool(true);
+
+        pool.add_peer(ipn(2)).await;
+
+        let empty = pool.remove(&local_addr).await;
+        assert!(empty);
+        assert_eq!(
+            removed.lock().unwrap().len(),
+            1,
+            "dynamically-registered peer should be withdrawn on connection drop"
+        );
     }
 }
