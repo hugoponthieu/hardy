@@ -296,18 +296,23 @@ impl Connector {
             writer_task.run().await;
         });
 
+        // Register the session BEFORE returning, so the connection is immediately
+        // usable by forward(). Registering inside the spawned task created a race:
+        // connect() returned before the session was in the pool, so forward()'s
+        // retry loop would dial again (and could exhaust its retries and drop the
+        // bundle) before the first session ever registered.
+        registry
+            .register_session(
+                sink,
+                connection::Connection { tx, local_addr },
+                remote_addr,
+                peer_init.node_id,
+            )
+            .await;
+
+        metrics::counter!("tcpclv4.session.established").increment(1);
+
         hardy_async::spawn!(self.tasks, "active_session_task", async move {
-            registry
-                .register_session(
-                    sink,
-                    connection::Connection { tx, local_addr },
-                    remote_addr,
-                    peer_init.node_id,
-                )
-                .await;
-
-            metrics::counter!("tcpclv4.session.established").increment(1);
-
             session.run().await;
 
             debug!(%local_addr, %remote_addr, "Session closed");
