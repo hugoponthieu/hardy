@@ -1,0 +1,26 @@
+log-level: "debug"
+node-ids: "ipn:1.0"
+
+grpc:
+  address: "[::1]:51051"
+  services: ["application", "service", "cla"]
+
+storage:
+  metadata:
+    type: "memory"
+  bundle:
+    type: "memory"
+
+static-routes:
+  routes-file: "./scripts/tcpcl-demo/node-1.routes"
+  watch: "none"
+
+clas:
+  - name: "tcp-1"
+    type: "tcpclv4"
+    address: "[::1]:14556"
+    # The whole point of this demo: node 2 is known purely from static config.
+    # No `bp ping`, no inbound connection — just a node-id -> address mapping.
+    peers:
+      - node-id: "ipn:2.0"
+        address: "[::1]:24556"

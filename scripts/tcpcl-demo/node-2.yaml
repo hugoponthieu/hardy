@@ -1,0 +1,22 @@
+log-level: "debug"
+node-ids: "ipn:2.0"
+
+grpc:
+  address: "[::1]:52051"
+  services: ["application", "service", "cla"]
+
+storage:
+  metadata:
+    type: "memory"
+  bundle:
+    type: "memory"
+
+static-routes:
+  routes-file: "./scripts/tcpcl-demo/node-2.routes"
+  watch: "none"
+
+clas:
+  - name: "tcp-2"
+    type: "tcpclv4"
+    address: "[::1]:24556"
+    # Pure listener for this isolation test — no static peers configured.

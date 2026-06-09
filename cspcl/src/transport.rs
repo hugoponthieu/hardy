@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use crate::config;
-use cspcl_bindings::async_api::{AsyncCspcl, AsyncReceiver, AsyncSender};
 use cspcl_bindings::{
-    Error as CspclError, Interface as CspInterface, InterfaceName, ReceivedBundle,
+    Cspcl as CspclInner, Error as CspclError, Interface as CspInterface, InterfaceName,
+    ReceivedBundle,
+    asynchronous::{Cspcl, Receiver, Sender},
 };
+use tracing::debug;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -21,9 +25,9 @@ pub enum ReceiveResult {
 
 #[derive(Clone)]
 pub struct Transport {
-    runtime: AsyncCspcl,
-    sender: AsyncSender,
-    receiver: AsyncReceiver,
+    cspcl: Arc<Cspcl>,
+    sender: Arc<Sender>,
+    receiver: Arc<Receiver>,
 }
 
 impl Transport {
@@ -34,15 +38,14 @@ impl Transport {
             }
             config::Interface::Can => CspInterface::Can(InterfaceName::new(&config.interface_name)),
         };
+        let cspcl_inner = CspclInner::new(config.local_addr, config.port, interface)?;
+        let cspcl = Arc::new(Cspcl::from_sync(cspcl_inner));
+        let (sender, receiver) = cspcl.split();
+        let sender = Arc::new(sender);
+        let receiver = Arc::new(receiver);
 
-        let runtime = AsyncCspcl::from_sync(cspcl_bindings::Cspcl::new(
-            config.local_addr,
-            config.port,
-            interface,
-        )?);
-        let (sender, receiver) = runtime.split();
         Ok(Self {
-            runtime,
+            cspcl,
             sender,
             receiver,
         })
@@ -54,6 +57,7 @@ impl Transport {
         addr: u8,
         port: u8,
     ) -> Result<(), Error> {
+        debug!("Try sending bundle to: {}:{}", addr, port);
         self.sender
             .send_bundle(&payload.into(), addr, port)
             .await
@@ -73,6 +77,6 @@ impl Transport {
     }
 
     pub async fn shutdown(&self) -> Result<(), Error> {
-        self.runtime.shutdown().await.map_err(Error::Init)
+        self.cspcl.shutdown().await.map_err(Error::Init)
     }
 }

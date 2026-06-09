@@ -1,17 +1,13 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use hardy_bpa::{
     Bytes,
     cla::{self, ClaAddress, CspAddress, ForwardBundleResult, Sink},
 };
-use tracing::{debug, warn};
+use hardy_bpv7::eid::NodeId;
+use tracing::warn;
 
-use crate::{
-    frame::Frame,
-    pending_acks::{AckError, PendingAcks},
-    registry::Registry,
-    transport::{self, Transport},
-};
+use crate::transport::{self, Transport};
 
 #[derive(Debug, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -65,36 +61,30 @@ mod tests {
     }
 }
 
+#[derive(Clone)]
 pub struct Runtime {
     sink: Arc<dyn Sink>,
-    registry: Arc<Registry>,
     transport: Arc<Transport>,
-    config: Config,
-    pending_acks: PendingAcks,
     tasks: hardy_async::TaskPool,
+    csp_to_endpoint: HashMap<CspAddress, NodeId>,
 }
 
 impl Runtime {
     pub fn new(
         sink: Arc<dyn Sink>,
-        registry: Arc<Registry>,
         transport: Arc<Transport>,
-        config: Config,
+        csp_to_endpoint: HashMap<CspAddress, NodeId>,
     ) -> Self {
         Self {
             sink,
-            registry,
             transport,
-            config,
-            pending_acks: Default::default(),
             tasks: hardy_async::TaskPool::new(),
+            csp_to_endpoint,
         }
     }
 
     pub fn start(self: Arc<Self>) {
         self.clone().start_receive_loop();
-        self.clone().start_hearbeat_loop();
-        self.clone().start_initial_probe_loop();
     }
 }
 
@@ -104,25 +94,17 @@ impl Runtime {
         bundle: Bytes,
         csp_addr: &CspAddress,
     ) -> cla::Result<ForwardBundleResult> {
-        let (frame, receiver) = self.pending_acks.add(bundle);
-        if self
+        let test = self
             .transport
-            .send_bundle(frame.clone(), csp_addr.addr, csp_addr.port)
-            .await
-            .is_err()
-        {
-            self.pending_acks.discard_ack(frame.bundle_id());
-            self.handle_peer_down(*csp_addr).await;
-            return Ok(ForwardBundleResult::NoNeighbour);
-        }
+            .send_bundle(bundle.clone(), csp_addr.addr, csp_addr.port)
+            .await;
 
-        match tokio::time::timeout(self.config.bundle_ack_timeout(), receiver).await {
-            Ok(Ok(())) => Ok(ForwardBundleResult::Sent),
-            Ok(Err(_)) | Err(_) => {
-                self.pending_acks.discard_ack(frame.bundle_id());
-                self.handle_peer_down(*csp_addr).await;
-                Ok(ForwardBundleResult::NoNeighbour)
-            }
+        match test {
+            Ok(_) => Ok(ForwardBundleResult::Sent),
+            Err(e) => match e {
+                transport::Error::Send(_) => Ok(ForwardBundleResult::NoNeighbour),
+                _ => Err(cla::Error::Internal(Box::new(e))),
+            },
         }
     }
 
@@ -134,65 +116,6 @@ impl Runtime {
         self.tasks.shutdown().await;
         if let Err(e) = self.transport.shutdown().await {
             warn!("transport shutdown failed: {e}");
-        }
-    }
-
-    async fn handle_peer_down(self: Arc<Runtime>, addr: CspAddress) {
-        if self.registry.mark_down(addr).is_some()
-            && let Err(e) = self.sink.remove_peer(&ClaAddress::Csp(addr)).await
-        {
-            warn!("remove_peer failed for {addr:?}: {e}");
-        }
-    }
-
-    pub fn start_hearbeat_loop(self: Arc<Runtime>) {
-        hardy_async::spawn!(self.clone().tasks, "cspcl_heartbeat_loop", async move {
-            self.heartbeat_loop().await;
-        });
-    }
-
-    async fn heartbeat_loop(self: Arc<Runtime>) {
-        let cancel = self.tasks.cancel_token().clone();
-        let mut ticker = tokio::time::interval(self.config.heartbeat_interval());
-        while !cancel.is_cancelled() {
-            tokio::select! {
-                _ = cancel.cancelled() => break,
-                _ = ticker.tick() => {
-                    for peer in self.registry.heartbeat_targets(self.config.heartbeat_interval()) {
-                        if let Err(e) = self.transport.send_bundle(Frame::Heartbeat, peer.addr, peer.port).await {
-                            warn!("heartbeat send failed for {peer:?}: {e}");
-                        }
-                    }
-
-                    for timed_out in self.registry.timed_out_peers(self.config.heartbeat_timeout()) {
-                        if let Err(e) = self.sink.remove_peer(&ClaAddress::Csp(timed_out.address)).await {
-                            warn!("remove_peer failed for {:?}: {}", timed_out.address, e);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    pub fn start_initial_probe_loop(self: Arc<Runtime>) {
-        hardy_async::spawn!(self.clone().tasks, "cspcl_initial_probe_loop", async move {
-            self.initial_probe_loop().await;
-        });
-    }
-
-    async fn initial_probe_loop(self: Arc<Runtime>) {
-        let cancel = self.tasks.cancel_token().clone();
-        let mut ticker = tokio::time::interval(self.config.initial_probe_interval());
-        while !cancel.is_cancelled() {
-            tokio::select! {
-                _ = cancel.cancelled() => break,
-                _ = ticker.tick() => {
-                    for peer in self.registry.probe_targets() {
-                        if let Err(e) = self.transport.send_bundle(Frame::Heartbeat, peer.addr, peer.port).await {
-                            warn!("initial probe failed for {peer:?}: {e}");
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -218,100 +141,18 @@ impl Runtime {
                 addr: incoming.src_addr,
                 port: incoming.src_port,
             };
+            let node_id = self.csp_to_endpoint.get(&inbound_peer);
 
-            let Some(peer_state) = self.registry.snapshot_by_addr(inbound_peer.addr) else {
-                debug!(
-                    "dropping frame from unknown or ambiguous peer {:?}",
-                    inbound_peer
-                );
-                continue;
-            };
-
-            if inbound_peer.port != peer_state.address.port {
-                debug!(
-                    "resolved inbound peer {:?} to configured {:?}",
-                    inbound_peer, peer_state.address
-                );
-            }
-
-            if let Some(announced) = self.registry.mark_live(peer_state.address) {
-                if let Err(e) = self
-                    .sink
-                    .add_peer(ClaAddress::Csp(announced.address), &[announced.node_id])
-                    .await
-                {
-                    warn!("add_peer failed for {:?}: {}", announced.address, e);
-                }
-            }
-
-            let frame = match Frame::try_from(&incoming.data) {
-                Ok(frame) => frame,
+            let peer_addr = ClaAddress::Csp(inbound_peer);
+            match self
+                .sink
+                .dispatch(incoming.data.into(), node_id, Some(&peer_addr))
+                .await
+            {
+                Ok(()) => {}
                 Err(e) => {
-                    warn!("dropping malformed frame from {:?}: {}", inbound_peer, e);
-                    continue;
+                    warn!("dispatch failed for {:?}: {}", peer_addr, e);
                 }
-            };
-
-            match frame {
-                Frame::Bundle { id, payload } => {
-                    let peer_addr = ClaAddress::Csp(peer_state.address);
-                    match self
-                        .sink
-                        .dispatch(payload.into(), Some(&peer_state.node_id), Some(&peer_addr))
-                        .await
-                    {
-                        Ok(()) => {
-                            if let Err(e) = self
-                                .transport
-                                .send_bundle(
-                                    Frame::BundleAck { id },
-                                    peer_state.address.addr,
-                                    peer_state.address.port,
-                                )
-                                .await
-                            {
-                                warn!(
-                                    "failed to send bundle ack to {:?}: {}",
-                                    peer_state.address, e
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            warn!("dispatch failed for {:?}: {}", peer_state.address, e);
-                        }
-                    }
-                }
-                Frame::BundleAck { id } => {
-                    if let Err(e) = self.pending_acks.ack_bundle(id) {
-                        match e {
-                            AckError::SenderNotFound => debug!(
-                                "received unexpected bundle ack id {} from {:?}",
-                                id, inbound_peer
-                            ),
-                            AckError::ReceiverDropped => debug!(
-                                "received bundle ack id {} from {:?}, but waiter was gone",
-                                id, inbound_peer
-                            ),
-                        };
-                    }
-                }
-                Frame::Heartbeat => {
-                    if let Err(e) = self
-                        .transport
-                        .send_bundle(
-                            Frame::HeartbeatAck,
-                            peer_state.address.addr,
-                            peer_state.address.port,
-                        )
-                        .await
-                    {
-                        warn!(
-                            "failed to send heartbeat ack to {:?}: {}",
-                            peer_state.address, e
-                        );
-                    }
-                }
-                Frame::HeartbeatAck => {}
             }
         }
     }

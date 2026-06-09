@@ -11,11 +11,8 @@ storage:
   bundle:
     type: "memory"
 
-asabr:
-  protocol-id: "asabr"
-  router: "SpsnHybridParenting"
-  contact-plan-path: "./scripts/cspcl-demo/contact-plan.cp"
-  local-node-id: "ipn:1.0"
+static-routes:
+  routes-file: "./scripts/cspcl-demo/node-a.routes"
 
 clas:
   - name: "csp-a"

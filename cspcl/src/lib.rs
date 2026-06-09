@@ -1,7 +1,4 @@
 mod config;
-mod frame;
-mod pending_acks;
-mod registry;
 mod runtime;
 mod transport;
 
@@ -10,12 +7,12 @@ pub use config::{Config, Interface, PeerConfig};
 use hardy_async::async_trait;
 use hardy_bpa::Bytes;
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::cla::{self, ClaAddress, ForwardBundleResult};
+use hardy_bpa::cla::{self, ClaAddress, CspAddress, ForwardBundleResult};
 use hardy_bpv7::eid::NodeId;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{debug, warn};
 
-use crate::registry::Registry;
 use crate::runtime::Runtime;
 
 #[derive(thiserror::Error, Debug)]
@@ -79,15 +76,24 @@ impl cla::Cla for Cla {
             }
         };
 
-        let runtime = Arc::new(Runtime::new(
-            sink,
-            Arc::new(Registry::new(&self.config.peers)),
-            transport,
-            self.config.runtime_config,
-        ));
-
+        let peers = self.config.peers.clone();
+        let mut csp_to_endpoint = HashMap::<CspAddress, NodeId>::new();
+        for peer in peers {
+            let csp_address = CspAddress {
+                addr: peer.addr,
+                port: peer.port,
+            };
+            csp_to_endpoint.insert(csp_address, peer.node_id.clone());
+            match sink
+                .add_peer(ClaAddress::Csp(csp_address), &[peer.node_id])
+                .await
+            {
+                Ok(res) => debug!(res),
+                Err(e) => debug!("{}", e.to_string()),
+            };
+        }
+        let runtime = Arc::new(Runtime::new(sink, transport, csp_to_endpoint));
         runtime.clone().start();
-
         self.set_runtime(runtime);
     }
 
@@ -103,6 +109,7 @@ impl cla::Cla for Cla {
         cla_addr: &ClaAddress,
         bundle: Bytes,
     ) -> cla::Result<ForwardBundleResult> {
+        debug!("Trying to send bundle ");
         let runtime = self.try_get_runtime()?;
         let ClaAddress::Csp(csp_addr) = cla_addr else {
             return Ok(ForwardBundleResult::NoNeighbour);

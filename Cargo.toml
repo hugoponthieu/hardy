@@ -1,38 +1,37 @@
 [workspace]
 resolver = "2"
-exclude = [
-    "tests/interop/mtcp",
-]
+exclude = ["tests/interop/mtcp"]
 members = [
-    "asabr-routing",
-    "async",
-    "bibe",
-    "bpa-server",
-    "bpa",
-    "bpa/fuzz",
-    "bpv7",
-    "bpv7/tools",
-    "bpv7/fuzz",
-    "cbor",
-    "cbor/tools",
-    "cbor/fuzz",
-    "echo-service",
-    "eid-patterns",
-    "eid-patterns/fuzz",
-    "file-cla",
-    "ipn-legacy-filter",
-    "localdisk-storage",
-    "otel",
-    "s3-storage",
-    "proto",
-    "sqlite-storage",
-    "tcpclv4",
-    "tcpclv4/fuzz",
-    "tcpclv4-server",
-    "tools",
-    "tvr",
-    "tests/storage",
-    "postgres-storage", "cspcl",
+  "asabr-routing",
+  "async",
+  "bibe",
+  "bpa-server",
+  "bpa",
+  "bpa/fuzz",
+  "bpv7",
+  "bpv7/tools",
+  "bpv7/fuzz",
+  "cbor",
+  "cbor/tools",
+  "cbor/fuzz",
+  "echo-service",
+  "eid-patterns",
+  "eid-patterns/fuzz",
+  "file-cla",
+  "ipn-legacy-filter",
+  "localdisk-storage",
+  "otel",
+  "s3-storage",
+  "proto",
+  "sqlite-storage",
+  "tcpclv4",
+  "tcpclv4/fuzz",
+  "tcpclv4-server",
+  "tools",
+  "tvr",
+  "tests/storage",
+  "postgres-storage",
+  "cspcl",
 ]
 
 # Stub patches: Cargo resolves optional deps eagerly (to produce a lock file
@@ -46,6 +45,8 @@ members = [
 sqlx-sqlite = { path = "patches/sqlx-sqlite" }
 # Removes RUSTSEC-2023-0071 (rsa Marvin Attack) — mysql feature is never enabled.
 sqlx-mysql = { path = "patches/sqlx-mysql" }
+cspcl = { path = "../cspcl/rust-bindings/cspcl" }
+cspcl-sys = { path = "../cspcl/rust-bindings/cspcl-sys" }
 
 [profile.release]
 #lto = true
