@@ -25,7 +25,7 @@ impl Default for PeerConfig {
         Self {
             node_id: "ipn:1.0".parse().expect("valid default node id"),
             addr: 0,
-            port: cspcl_bindings::cspcl_sys::CSPCL_PORT_BP as u8,
+            port: 0,
             heartbeat_interval: None,
         }
     }
@@ -47,7 +47,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             local_addr: 1,
-            port: cspcl_bindings::cspcl_sys::CSPCL_PORT_BP as u8,
+            port: 0,
             interface: Interface::Loopback,
             interface_name: "loopback".to_string(),
             peers: Vec::new(),

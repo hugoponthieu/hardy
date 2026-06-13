@@ -45,8 +45,8 @@ members = [
 sqlx-sqlite = { path = "patches/sqlx-sqlite" }
 # Removes RUSTSEC-2023-0071 (rsa Marvin Attack) — mysql feature is never enabled.
 sqlx-mysql = { path = "patches/sqlx-mysql" }
-cspcl = { path = "../cspcl/rust-bindings/cspcl" }
-cspcl-sys = { path = "../cspcl/rust-bindings/cspcl-sys" }
+cspcl = { path = "../cspcl-pool-management/rust-bindings/cspcl" }
+cspcl-sys = { path = "../cspcl-pool-management/rust-bindings/cspcl-sys" }
 
 [profile.release]
 #lto = true

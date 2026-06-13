@@ -1,13 +1,14 @@
+use cspcl_bindings::InboundStream;
+use futures_util::TryStreamExt;
 use std::{collections::HashMap, sync::Arc, time::Duration};
+use tracing::warn;
 
 use hardy_bpa::{
     Bytes,
-    cla::{self, ClaAddress, CspAddress, ForwardBundleResult, Sink},
+    cla::{ClaAddress, CspAddress, Sink},
 };
 use hardy_bpv7::eid::NodeId;
-use tracing::warn;
-
-use crate::transport::{self, Transport};
+use tokio::task;
 
 #[derive(Debug, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -48,6 +49,52 @@ impl Default for Config {
     }
 }
 
+pub struct Runtime {
+    pub csp_to_endpoint: HashMap<CspAddress, NodeId>,
+}
+
+impl Runtime {
+    pub fn new(csp_to_endpoint: HashMap<CspAddress, NodeId>) -> Self {
+        Self { csp_to_endpoint }
+    }
+
+    pub async fn start_inbound(&self, sink: Arc<dyn Sink>, mut inbound: InboundStream) {
+        let csp_to_endpoint = self.csp_to_endpoint.clone();
+
+        let csp_to_addr_iter = self.csp_to_endpoint.iter();
+        for csp_node in csp_to_addr_iter {
+            let _ = sink
+                .add_peer(ClaAddress::Csp(*csp_node.0), &[csp_node.1.clone()])
+                .await;
+        }
+
+        task::spawn(async move {
+            loop {
+                let next_bundle = inbound.try_next().await;
+                let bundle = match next_bundle {
+                    Ok(bundle) => match bundle {
+                        Some(bundle) => bundle,
+                        None => continue,
+                    },
+                    Err(e) => {
+                        warn!("Error occured when receiving bundle: {}", e.to_string());
+                        continue;
+                    }
+                };
+                let bundle_data: Bytes = bundle.data.into();
+                let csp_peer_addr = CspAddress {
+                    addr: bundle.src_addr,
+                    port: bundle.src_port,
+                };
+                let node_id = csp_to_endpoint.get(&csp_peer_addr);
+                let _ = sink
+                    .dispatch(bundle_data, node_id, Some(&ClaAddress::Csp(csp_peer_addr)))
+                    .await;
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Config;
@@ -58,102 +105,5 @@ mod tests {
 
         assert_eq!(config.heartbeat_interval().as_secs(), 5);
         assert_eq!(config.heartbeat_timeout().as_secs(), 15);
-    }
-}
-
-#[derive(Clone)]
-pub struct Runtime {
-    sink: Arc<dyn Sink>,
-    transport: Arc<Transport>,
-    tasks: hardy_async::TaskPool,
-    csp_to_endpoint: HashMap<CspAddress, NodeId>,
-}
-
-impl Runtime {
-    pub fn new(
-        sink: Arc<dyn Sink>,
-        transport: Arc<Transport>,
-        csp_to_endpoint: HashMap<CspAddress, NodeId>,
-    ) -> Self {
-        Self {
-            sink,
-            transport,
-            tasks: hardy_async::TaskPool::new(),
-            csp_to_endpoint,
-        }
-    }
-
-    pub fn start(self: Arc<Self>) {
-        self.clone().start_receive_loop();
-    }
-}
-
-impl Runtime {
-    pub async fn send_bundle(
-        self: Arc<Self>,
-        bundle: Bytes,
-        csp_addr: &CspAddress,
-    ) -> cla::Result<ForwardBundleResult> {
-        let test = self
-            .transport
-            .send_bundle(bundle.clone(), csp_addr.addr, csp_addr.port)
-            .await;
-
-        match test {
-            Ok(_) => Ok(ForwardBundleResult::Sent),
-            Err(e) => match e {
-                transport::Error::Send(_) => Ok(ForwardBundleResult::NoNeighbour),
-                _ => Err(cla::Error::Internal(Box::new(e))),
-            },
-        }
-    }
-
-    pub async fn unregister_sink(self: Arc<Runtime>) {
-        self.sink.unregister().await;
-    }
-
-    pub async fn shutdown(self: Arc<Runtime>) {
-        self.tasks.shutdown().await;
-        if let Err(e) = self.transport.shutdown().await {
-            warn!("transport shutdown failed: {e}");
-        }
-    }
-
-    pub fn start_receive_loop(self: Arc<Runtime>) {
-        hardy_async::spawn!(self.clone().tasks, "cspcl_recv_loop", async move {
-            self.receive_loop().await;
-        });
-    }
-
-    async fn receive_loop(self: Arc<Runtime>) {
-        let cancel = self.tasks.cancel_token().clone();
-        while !cancel.is_cancelled() {
-            let incoming = match self.transport.recv_bundle(1000).await {
-                Ok(transport::ReceiveResult::Timeout) => continue,
-                Ok(transport::ReceiveResult::Bundle(bundle)) => bundle,
-                Err(e) => {
-                    warn!("receive loop transport error: {e}");
-                    continue;
-                }
-            };
-
-            let inbound_peer = CspAddress {
-                addr: incoming.src_addr,
-                port: incoming.src_port,
-            };
-            let node_id = self.csp_to_endpoint.get(&inbound_peer);
-
-            let peer_addr = ClaAddress::Csp(inbound_peer);
-            match self
-                .sink
-                .dispatch(incoming.data.into(), node_id, Some(&peer_addr))
-                .await
-            {
-                Ok(()) => {}
-                Err(e) => {
-                    warn!("dispatch failed for {:?}: {}", peer_addr, e);
-                }
-            }
-        }
     }
 }

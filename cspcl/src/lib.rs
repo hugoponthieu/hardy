@@ -5,15 +5,17 @@ mod transport;
 pub use config::{Config, Interface, PeerConfig};
 
 use hardy_async::async_trait;
+use hardy_async::sync::RwLock;
 use hardy_bpa::Bytes;
 use hardy_bpa::bpa::BpaRegistration;
+use hardy_bpa::cla::ForwardBundleResult::NoNeighbour;
 use hardy_bpa::cla::{self, ClaAddress, CspAddress, ForwardBundleResult};
 use hardy_bpv7::eid::NodeId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, warn};
 
 use crate::runtime::Runtime;
+use crate::transport::Transport;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -21,19 +23,41 @@ pub enum Error {
     Init(#[from] transport::Error),
     #[error("registration failed: {0}")]
     Registration(#[from] cla::Error),
+    #[error("could not create cspcl: {0}")]
+    CscplInit(#[from] cspcl_bindings::Error),
 }
 
 pub struct Cla {
-    config: Config,
-    runtime: hardy_async::sync::spin::Mutex<Option<Arc<Runtime>>>,
+    transport: transport::Transport,
+    runtime: runtime::Runtime,
 }
 
 impl Cla {
     pub fn new(config: &Config) -> Result<Self, Error> {
-        Ok(Self {
-            config: config.clone(),
-            runtime: hardy_async::sync::spin::Mutex::new(None),
-        })
+        let interface: cspcl_bindings::Interface = match config.interface {
+            Interface::Loopback => cspcl_bindings::Interface::Loopback,
+            Interface::Can => cspcl_bindings::Interface::Can(config.interface_name.clone()),
+        };
+
+        let cspcl = Arc::new(RwLock::new(
+            cspcl_bindings::Cspcl::new(config.local_addr, config.port, interface)
+                .map_err(|e: cspcl_bindings::Error| Error::CscplInit(e))?,
+        ));
+
+        let peers = config.peers.clone();
+        let mut csp_to_endpoint = HashMap::<CspAddress, NodeId>::new();
+        for peer in peers {
+            let csp_address = CspAddress {
+                addr: peer.addr,
+                port: peer.port,
+            };
+            csp_to_endpoint.insert(csp_address, peer.node_id.clone());
+        }
+
+        let transport = Transport::new(cspcl.clone());
+        let runtime = Runtime::new(csp_to_endpoint);
+
+        Ok(Self { transport, runtime })
     }
 
     pub async fn register(
@@ -46,62 +70,18 @@ impl Cla {
         Ok(())
     }
 
-    pub async fn unregister(&self) {
-        if let Some(runtime) = self.runtime.lock().as_ref() {
-            runtime.clone().unregister_sink().await;
-        }
-    }
-
-    pub fn set_runtime(&self, runtime: Arc<Runtime>) {
-        *self.runtime.lock() = Some(runtime);
-    }
-
-    pub fn try_get_runtime(&self) -> cla::Result<Arc<Runtime>> {
-        self.runtime
-            .lock()
-            .clone()
-            .ok_or_else(|| cla::Error::Disconnected)
-    }
+    pub async fn unregister(&self) {}
 }
 
 #[async_trait]
 impl cla::Cla for Cla {
     async fn on_register(&self, sink: Box<dyn cla::Sink>, _node_ids: &[NodeId]) {
         let sink: Arc<dyn cla::Sink> = sink.into();
-        let transport = match transport::Transport::new(&self.config) {
-            Ok(t) => Arc::new(t),
-            Err(e) => {
-                warn!("cspcl transport init failed: {e}");
-                return;
-            }
-        };
-
-        let peers = self.config.peers.clone();
-        let mut csp_to_endpoint = HashMap::<CspAddress, NodeId>::new();
-        for peer in peers {
-            let csp_address = CspAddress {
-                addr: peer.addr,
-                port: peer.port,
-            };
-            csp_to_endpoint.insert(csp_address, peer.node_id.clone());
-            match sink
-                .add_peer(ClaAddress::Csp(csp_address), &[peer.node_id])
-                .await
-            {
-                Ok(res) => debug!(res),
-                Err(e) => debug!("{}", e.to_string()),
-            };
-        }
-        let runtime = Arc::new(Runtime::new(sink, transport, csp_to_endpoint));
-        runtime.clone().start();
-        self.set_runtime(runtime);
+        let inbound_stream = self.transport.inbound_stream();
+        self.runtime.start_inbound(sink, inbound_stream).await;
     }
 
-    async fn on_unregister(&self) {
-        if let Some(runtime) = self.runtime.lock().take() {
-            runtime.shutdown().await;
-        }
-    }
+    async fn on_unregister(&self) {}
 
     async fn forward(
         &self,
@@ -109,11 +89,16 @@ impl cla::Cla for Cla {
         cla_addr: &ClaAddress,
         bundle: Bytes,
     ) -> cla::Result<ForwardBundleResult> {
-        debug!("Trying to send bundle ");
-        let runtime = self.try_get_runtime()?;
         let ClaAddress::Csp(csp_addr) = cla_addr else {
             return Ok(ForwardBundleResult::NoNeighbour);
         };
-        runtime.send_bundle(bundle, csp_addr).await
+        match self
+            .transport
+            .send_bundle(bundle, csp_addr.addr, csp_addr.port)
+            .await
+        {
+            Ok(_) => Ok(ForwardBundleResult::Sent),
+            Err(_) => Ok(NoNeighbour),
+        }
     }
 }

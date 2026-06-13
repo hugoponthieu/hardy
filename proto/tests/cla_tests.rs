@@ -232,12 +232,7 @@ async fn cla_cli_06_csp_addresses_round_trip() {
     let remote_bpa = RemoteBpa::new(grpc_addr);
 
     let _node_ids: Vec<NodeId> = remote_bpa
-        .register_cla(
-            "test-cla-csp".to_string(),
-            Some(cla::ClaAddressType::Csp),
-            cla.clone(),
-            None,
-        )
+        .register_cla("test-cla-csp".to_string(), cla.clone(), None)
         .await
         .expect("registration should succeed");
 
