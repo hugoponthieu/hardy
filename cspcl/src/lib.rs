@@ -5,11 +5,11 @@ mod transport;
 pub use config::{Config, Interface, PeerConfig};
 
 use hardy_async::async_trait;
-use hardy_async::sync::RwLock;
+use hardy_async::sync::spin::{Once, RwLock};
 use hardy_bpa::Bytes;
 use hardy_bpa::bpa::BpaRegistration;
 use hardy_bpa::cla::ForwardBundleResult::NoNeighbour;
-use hardy_bpa::cla::{self, ClaAddress, CspAddress, ForwardBundleResult};
+use hardy_bpa::cla::{self, ClaAddress, ClaAddressType, CspAddress, ForwardBundleResult};
 use hardy_bpv7::eid::NodeId;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,7 +29,8 @@ pub enum Error {
 
 pub struct Cla {
     transport: transport::Transport,
-    runtime: runtime::Runtime,
+    runtime: RwLock<runtime::Runtime>,
+    sink: Once<Arc<dyn cla::Sink>>,
 }
 
 impl Cla {
@@ -55,9 +56,13 @@ impl Cla {
         }
 
         let transport = Transport::new(cspcl.clone());
-        let runtime = Runtime::new(csp_to_endpoint);
+        let runtime = RwLock::new(Runtime::new(csp_to_endpoint));
 
-        Ok(Self { transport, runtime })
+        Ok(Self {
+            transport,
+            runtime,
+            sink: Once::new(),
+        })
     }
 
     pub async fn register(
@@ -75,10 +80,18 @@ impl Cla {
 
 #[async_trait]
 impl cla::Cla for Cla {
+    fn address_type(&self) -> Option<ClaAddressType> {
+        Some(ClaAddressType::Csp)
+    }
+
     async fn on_register(&self, sink: Box<dyn cla::Sink>, _node_ids: &[NodeId]) {
         let sink: Arc<dyn cla::Sink> = sink.into();
-        let inbound_stream = self.transport.inbound_stream();
-        self.runtime.start_inbound(sink, inbound_stream).await;
+        let sink = self.sink.call_once(|| sink);
+        let inbound_stream = self.transport.inbound_stream().await;
+        self.runtime
+            .write()
+            .start_inbound(sink.clone(), inbound_stream)
+            .await;
     }
 
     async fn on_unregister(&self) {}

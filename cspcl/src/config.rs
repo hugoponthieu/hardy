@@ -1,7 +1,5 @@
 use hardy_bpv7::eid::NodeId;
 
-use crate::runtime;
-
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "kebab-case"))]
@@ -40,7 +38,6 @@ pub struct Config {
     pub interface: Interface,
     pub interface_name: String,
     pub peers: Vec<PeerConfig>,
-    pub runtime_config: runtime::Config,
 }
 
 impl Default for Config {
@@ -51,7 +48,6 @@ impl Default for Config {
             interface: Interface::Loopback,
             interface_name: "loopback".to_string(),
             peers: Vec::new(),
-            runtime_config: runtime::Config::default(),
         }
     }
 }

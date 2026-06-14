@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use cspcl_bindings::{Error as CspclError, InboundStream};
-use hardy_async::sync::RwLock;
+use hardy_async::sync::spin::RwLock;
 use tracing::debug;
 
 #[derive(Debug, thiserror::Error)]
@@ -37,7 +37,7 @@ impl Transport {
             .map_err(Error::Send)
     }
 
-    pub fn inbound_stream(&self) -> InboundStream {
-        self.cspcl.read().clone().inbound()
+    pub async fn inbound_stream(&self) -> InboundStream {
+        self.cspcl.read().clone().inbound().await
     }
 }
