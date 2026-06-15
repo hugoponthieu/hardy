@@ -1,5 +1,6 @@
 use cspcl_bindings::InboundStream;
 use futures_util::TryStreamExt;
+use hardy_async::CancellationToken;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, info, warn};
 
@@ -13,6 +14,7 @@ use tokio::task::{self, JoinHandle};
 pub struct Runtime {
     pub csp_to_endpoint: HashMap<CspAddress, NodeId>,
     polling_task: Option<JoinHandle<()>>,
+    cancel_polling_task: CancellationToken,
 }
 
 impl Runtime {
@@ -20,7 +22,12 @@ impl Runtime {
         Self {
             csp_to_endpoint,
             polling_task: None,
+            cancel_polling_task: CancellationToken::new(),
         }
+    }
+
+    pub fn stop(&self) {
+        self.cancel_polling_task.cancel();
     }
 
     pub async fn start_inbound(&mut self, sink: Arc<dyn Sink>, mut inbound: InboundStream) {
@@ -46,11 +53,15 @@ impl Runtime {
                 ),
             }
         }
+        let cancel_token = self.cancel_polling_task.child_token();
 
         info!("Starting polling task of inbound bundle stream");
 
         let polling_task = task::spawn(async move {
             loop {
+                if cancel_token.is_cancelled() {
+                    break;
+                };
                 debug!("Polling Hardy CSPCL inbound stream");
                 let next_bundle = inbound.try_next().await;
                 let bundle = match next_bundle {
@@ -80,7 +91,7 @@ impl Runtime {
                     .dispatch(bundle_data, node_id, Some(&ClaAddress::Csp(csp_peer_addr)))
                     .await
                 {
-                    Ok(()) => debug!(
+                    Ok(()) => info!(
                         peer_node = node_id.map(|node_id| node_id.to_string()),
                         "Dispatched inbound CSP bundle from {}:{} to BPA",
                         csp_peer_addr.addr,

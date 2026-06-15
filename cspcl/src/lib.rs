@@ -13,6 +13,7 @@ use hardy_bpa::cla::{self, ClaAddress, ClaAddressType, CspAddress, ForwardBundle
 use hardy_bpv7::eid::NodeId;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::debug;
 
 use crate::runtime::Runtime;
 use crate::transport::Transport;
@@ -75,7 +76,11 @@ impl Cla {
         Ok(())
     }
 
-    pub async fn unregister(&self) {}
+    pub async fn unregister(&self) {
+        debug!("Unregistering cspcl...");
+        self.transport.cleanup();
+        self.runtime.write().stop();
+    }
 }
 
 #[async_trait]
@@ -94,7 +99,9 @@ impl cla::Cla for Cla {
             .await;
     }
 
-    async fn on_unregister(&self) {}
+    async fn on_unregister(&self) {
+        self.unregister().await;
+    }
 
     async fn forward(
         &self,

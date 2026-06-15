@@ -1286,6 +1286,7 @@ dependencies = [
  "cspcl-sys",
  "futures",
  "tokio",
+ "tokio-util",
  "trace",
  "tracing",
 ]

@@ -40,4 +40,9 @@ impl Transport {
     pub async fn inbound_stream(&self) -> InboundStream {
         self.cspcl.read().clone().inbound().await
     }
+
+    pub fn cleanup(&self) {
+        let cspcl = self.cspcl.write();
+        drop(cspcl);
+    }
 }
