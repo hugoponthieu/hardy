@@ -59,17 +59,17 @@ impl Runtime {
 
         let polling_task = task::spawn(async move {
             loop {
-                if cancel_token.is_cancelled() {
-                    break;
-                };
                 debug!("Polling Hardy CSPCL inbound stream");
-                let next_bundle = inbound.try_next().await;
+                let next_bundle = tokio::select! {
+                    _ = cancel_token.cancelled() => break,
+                    next_bundle = inbound.try_next() => next_bundle,
+                };
                 let bundle = match next_bundle {
                     Ok(bundle) => match bundle {
                         Some(bundle) => bundle,
                         None => {
-                            debug!("Polled an empty bundle");
-                            continue;
+                            debug!("Hardy CSPCL inbound stream closed");
+                            break;
                         }
                     },
                     Err(e) => {

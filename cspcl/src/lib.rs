@@ -8,12 +8,11 @@ use hardy_async::async_trait;
 use hardy_async::sync::spin::{Once, RwLock};
 use hardy_bpa::Bytes;
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::cla::ForwardBundleResult::NoNeighbour;
 use hardy_bpa::cla::{self, ClaAddress, ClaAddressType, CspAddress, ForwardBundleResult};
 use hardy_bpv7::eid::NodeId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::runtime::Runtime;
 use crate::transport::Transport;
@@ -118,7 +117,13 @@ impl cla::Cla for Cla {
             .await
         {
             Ok(_) => Ok(ForwardBundleResult::Sent),
-            Err(_) => Ok(NoNeighbour),
+            Err(e) => {
+                warn!(
+                    "Failed to send CSP bundle to {}:{}: {e}",
+                    csp_addr.addr, csp_addr.port
+                );
+                Err(cla::Error::Internal(Box::new(e)))
+            }
         }
     }
 }
