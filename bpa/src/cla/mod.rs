@@ -24,7 +24,14 @@ pub enum Error {
     #[error(transparent)]
     Internal(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
-
+///
+/// A native CSP transport address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CspAddress {
+    pub addr: u8,
+    pub port: u8,
+}
 /// An enumeration of known CLA address types.
 ///
 /// This is used to identify the protocol associated with a `ClaAddress`.
@@ -33,6 +40,7 @@ pub enum Error {
 pub enum ClaAddressType {
     /// IPv4 and IPv6 address + port.
     Tcp,
+    Csp,
     /// A private address type.
     Private,
 }
@@ -43,6 +51,7 @@ pub enum ClaAddressType {
 pub enum ClaAddress {
     /// An TCP address, represented as a standard socket address.
     Tcp(core::net::SocketAddr),
+    Csp(CspAddress),
     /// An address for an unknown or custom CLA, containing the type identifier and the raw address bytes.
     #[cfg_attr(feature = "serde", serde(with = "private_addr_serde"))]
     Private(Bytes),
@@ -72,6 +81,7 @@ impl ClaAddress {
     pub fn address_type(&self) -> ClaAddressType {
         match self {
             ClaAddress::Tcp(_) => ClaAddressType::Tcp,
+            ClaAddress::Csp(_) => ClaAddressType::Csp,
             ClaAddress::Private(_) => ClaAddressType::Private,
         }
     }
@@ -89,6 +99,25 @@ impl TryFrom<(ClaAddressType, Bytes)> for ClaAddress {
                     .map_err(|e| Error::Internal(Box::new(e)))?,
             )),
             ClaAddressType::Private => Ok(ClaAddress::Private(addr)),
+            ClaAddressType::Csp => {
+                let bytes = addr.as_ref();
+                if bytes.len() != 2 {
+                    return Err(Error::Internal(
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            format!(
+                                "Invalid CSP address length: expected 2, got {}",
+                                bytes.len()
+                            ),
+                        )
+                        .into(),
+                    ));
+                }
+                Ok(ClaAddress::Csp(CspAddress {
+                    addr: bytes[0],
+                    port: bytes[1],
+                }))
+            }
         }
     }
 }
@@ -100,6 +129,10 @@ impl From<ClaAddress> for (ClaAddressType, Bytes) {
                 ClaAddressType::Tcp,
                 socket_addr.to_string().into_bytes().into(),
             ),
+            ClaAddress::Csp(csp_addr) => (
+                ClaAddressType::Csp,
+                Bytes::from(vec![csp_addr.addr, csp_addr.port]),
+            ),
             ClaAddress::Private(bytes) => (ClaAddressType::Private, bytes),
         }
     }
@@ -109,6 +142,7 @@ impl core::fmt::Display for ClaAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ClaAddress::Tcp(socket_addr) => write!(f, "tcp:{socket_addr}"),
+            ClaAddress::Csp(csp_addr) => write!(f, "csp:{}:{}", csp_addr.addr, csp_addr.port),
             ClaAddress::Private(bytes) => {
                 write!(f, "private:{bytes:02x?}")
             }
